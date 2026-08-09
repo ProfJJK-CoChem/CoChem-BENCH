@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cochem-bench"
+version = "0.1.0"
+description = "CoChem-BENCH: Complete Basis Set (CBS) Extrapolation and High-Level Quantum Benchmarking"
+authors = [{ name = "CoChem Development Team" }]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "scipy",
+    "h5py"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bench_core*"]
