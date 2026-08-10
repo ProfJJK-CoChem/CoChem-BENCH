@@ -21,10 +21,10 @@ ATOMIC_NUMBERS = {
 
 def map_core_valence_basis_per_element(symbols: list, base_cv_basis: str = "aug-cc-pCVTZ") -> dict:
     """
-    Resolves BENCH-07: Atomic-number aware core-valence basis set mapping.
-    Heavy elements (Z >= 3) receive requested core-valence basis set (e.g. aug-cc-pCVTZ).
-    Light elements H (Z=1) and He (Z=2) have no core electrons and no aug-cc-pCVTZ definition;
-    they are mapped to standard valence basis sets (e.g. aug-cc-pVTZ).
+    Resolves BENCH-07 & Suggestion 14: Atomic-number aware core-valence basis set mapping.
+    - Light elements H (Z=1) and He (Z=2): mapped to standard valence basis set (e.g. aug-cc-pVTZ).
+    - Heavy elements (Z > 36): mapped to relativistic core-polarization basis set (e.g. aug-cc-pwCVTZ-DK / cc-pwCVTZ-DK).
+    - Intermediate elements (3 <= Z <= 36): mapped to requested core-valence basis set (e.g. aug-cc-pCVTZ).
     """
     element_basis_map = {}
     
@@ -39,8 +39,16 @@ def map_core_valence_basis_per_element(symbols: list, base_cv_basis: str = "aug-
             # H (Z=1) and He (Z=2): map to aug-cc-pVTZ
             element_basis_map[sym] = valence_fallback
             logger.info(f"Element {sym} (Z={z}) mapped to valence basis {valence_fallback} (no core electrons).")
+        elif z > 36:
+            # Heavy elements Z > 36: map to relativistic core polarization basis set
+            if "aug-" in base_cv_basis.lower():
+                b_name = "aug-cc-pwCVTZ-DK"
+            else:
+                b_name = "cc-pwCVTZ-DK"
+            element_basis_map[sym] = b_name
+            logger.info(f"Element {sym} (Z={z} > 36) mapped to heavy-element core-polarization basis {b_name}.")
         else:
-            # Heavy elements Z >= 3: map to aug-cc-pCVTZ
+            # Intermediate elements 3 <= Z <= 36: map to aug-cc-pCVTZ
             element_basis_map[sym] = base_cv_basis
             
     return element_basis_map

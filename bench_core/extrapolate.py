@@ -58,12 +58,17 @@ def calculate_karton_martin(hf_x3: float, hf_x4: float, family: str = "aug-cc-pV
     hf_cbs = hf_x4 - a_param * np.exp(-alpha * np.sqrt(x4))
     return float(hf_cbs)
 
+import warnings
+
 def compute_total_cbs_energy(hf_x3: float, hf_x4: float, corr_x3: float, corr_x4: float, 
                              is_f12: bool = True, basis_family: str = "aug-cc-pVXZ") -> dict:
     """
     Combines HF SCF CBS and correlation CBS energies.
     Returns dictionary with HF_CBS, Corr_CBS, and Total_CBS.
     """
+    if is_f12 or "f12" in basis_family.lower():
+        warnings.warn("Canonical CBS extrapolation is deprecated for F12 methods (e.g., cc-pVTZ-F12).", DeprecationWarning)
+        
     hf_cbs = calculate_karton_martin(hf_x3, hf_x4, family=basis_family)
     
     if is_f12:

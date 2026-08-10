@@ -48,7 +48,13 @@ def test_counterpoise_input_generation():
     cp_res = generate_counterpoise_input(frag_a, frag_b, basis="aug-cc-pVTZ")
     assert "complex_input" in cp_res
     assert "monomer_a_input" in cp_res
-    assert "H :" in cp_res["monomer_a_input"] or "Cl:" in cp_res["monomer_a_input"]
+    assert "monomer_b_input" in cp_res
+    # Complex input must have all real atoms and no ghost atoms (no ':')
+    assert ":" not in cp_res["complex_input"]
+    # Monomer A input must contain frag_b ghost atoms
+    assert "Cl:" in cp_res["monomer_a_input"]
+    # Monomer B input must contain frag_a ghost atoms ("O:" without space before colon)
+    assert "O:" in cp_res["monomer_b_input"]
 
 def test_multireference_verification():
     # BENCH-06: Multi-tiered diagnostic check
@@ -79,3 +85,43 @@ def test_thermochemical_cbs_and_hdf5_serialization():
         h5_p = Path(tmpdir) / "test_state.h5"
         serialize_cbs_to_hdf5(h5_p, thermo)
         assert h5_p.exists()
+
+def test_dynamic_maxcore_and_tight_keywords():
+    from bench_core.ram_estimator import calculate_dynamic_maxcore
+    mc = calculate_dynamic_maxcore(nprocs=4, node_max_gb=16.0)
+    assert mc >= 1000
+
+    coords = [("C", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 1.1)]
+    inp = generate_dlpno_ccsd_f12(coords, tight_scf=True, is_opt=True, nprocs=4)
+    assert "TightSCF" in inp
+    assert "TolMaxG" in inp
+    assert "TightOPT" not in inp
+
+def test_heavy_element_z36_core_blocks():
+    # Suggestion 14: Iodine Z=53 heavy element core blocks and -DK basis
+    coords = [("I", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 1.6)]
+    inp = generate_dlpno_ccsd_f12(coords, basis="aug-cc-pVTZ", rel_mode="auto")
+    assert "%core CVCut 1.0e-5 end" in inp
+    assert "-DK" in inp
+
+def test_scratch_disk_space_exception_safety():
+    from bench_core.ram_estimator import check_scratch_disk_space
+    # Invalid path causing exception returns False
+    res = check_scratch_disk_space(required_gb=10.0, scratch_path="Z:\\NonExistentPath\\FakeDir")
+    assert res is False
+
+def test_shm_checksum_verification():
+    from bench_core.verifier import verify_openmpi_shm_checksum
+    data = b"SampleOpenMPISharedMemoryTensorBufferData"
+    res = verify_openmpi_shm_checksum(data)
+    assert res["passed"] is True
+    assert len(res["checksum"]) == 64
+
+def test_provenance_json_dynamic_version():
+    from bench_core.verifier import get_active_orca_version, export_provenance_json
+    ver = get_active_orca_version()
+    assert "ORCA" in ver
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = Path(tmpdir) / "prov.json"
+        export_provenance_json({}, {"passed": True}, output_path=p)
+        assert p.exists()

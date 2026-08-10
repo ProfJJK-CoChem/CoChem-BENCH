@@ -17,8 +17,8 @@ from pathlib import Path
 
 from bench_core.ram_estimator import estimate_ccsd_memory, set_storage_strategy, check_scratch_disk_space
 from bench_core.extrapolate import compute_total_cbs_energy
-from bench_core.orca_writer import generate_dlpno_ccsd_f12
-from bench_core.verifier import verify_multireference_gate, export_provenance_json
+from bench_core.mpqc_writer import generate_mpqc_ccsd_f12
+from bench_core.verifier import verify_multireference_gate, export_provenance_json, verify_openmpi_shm_checksum
 
 logger = logging.getLogger("CoChem-BENCH.dispatcher")
 
@@ -97,9 +97,9 @@ def serialize_cbs_to_hdf5(h5_file_path: Path, cbs_data: dict, dataset_path: str 
         
     logger.info(f"Serialized CBS energy {val:.8f} Hartree with SWMR metadata to {h5_file_path}:{dataset_path}")
 
-async def stream_orca_progress(log_file_path: Path, callback=None):
+async def stream_mpqc_progress(log_file_path: Path, callback=None):
     """
-    Resolves BENCH-19: Asynchronous log streamer and regex parser for ORCA iteration monitoring.
+    Resolves BENCH-19: Asynchronous log streamer and regex parser for MPQC iteration monitoring.
     Extracts iteration progress, SCF energy, and elapsed execution time.
     """
     log_file_path = Path(log_file_path)
@@ -122,10 +122,21 @@ async def stream_orca_progress(log_file_path: Path, callback=None):
                         energy = float(match.group(2))
                         if callback:
                             callback(iter_num, energy)
-                    if "ORCA TERMINATED NORMALLY" in line:
-                        logger.info("ORCA normal termination detected by progress monitor.")
+                    if "MPQC TERMINATED NORMALLY" in line:
+                        logger.info("MPQC normal termination detected by progress monitor.")
                         return
         await asyncio.sleep(0.5)
+
+def verify_execution_output(mpqc_output_text: str, spin_multiplicity: int = 1, shm_buffer=None) -> dict:
+    """
+    Executes complete output verification including multireference diagnostic check
+    and OpenMPI shared memory checksum verification.
+    """
+    res = verify_multireference_gate(mpqc_output_text, spin_multiplicity=spin_multiplicity)
+    if shm_buffer is not None:
+        shm_res = verify_openmpi_shm_checksum(shm_buffer)
+        res["shm_checksum"] = shm_res
+    return res
 
 def main():
     print("--- CoChem-BENCH Master Dispatcher ---")
@@ -148,15 +159,16 @@ def main():
     
     check_scratch_disk_space(required_gb=10.0)
     
-    inp = generate_dlpno_ccsd_f12(sample_coords, basis="aug-cc-pVTZ", strategy=strategy["strategy"], nprocs=8)
-    print("Generated ORCA Input Sample:\n", inp[:250], "\n...")
+    inp = generate_mpqc_ccsd_f12(sample_coords, basis="cc-pVTZ-F12")
+    print("Generated MPQC Input Sample:\n", inp[:250], "\n...")
     
     # Calculate sample CBS
-    cbs_res = compute_total_cbs_energy(hf_x3=-76.060, hf_x4=-76.065, corr_x3=-0.280, corr_x4=-0.290, is_f12=True)
+    cbs_res = compute_total_cbs_energy(hf_x3=-76.060, hf_x4=-76.065, corr_x3=-0.280, corr_x4=-0.290, is_f12=True, basis_family="cc-pVTZ-F12")
     thermo_res = compute_thermochemical_cbs(cbs_res["total_cbs"], zpe=0.021, thermal_h_corr=0.025, thermal_g_corr=0.004)
     
-    sample_orca_out = "T1 diagnostic : 0.0120\nD1 diagnostic : 0.0310\n"
-    ver_res = verify_multireference_gate(sample_orca_out, spin_multiplicity=1)
+    sample_mpqc_out = "T1 diagnostic : 0.0120\nD1 diagnostic : 0.0310\n"
+    sample_shm_buf = b"OpenMPI Shared Memory Tensor Buffer Content Sample"
+    ver_res = verify_execution_output(sample_mpqc_out, spin_multiplicity=1, shm_buffer=sample_shm_buf)
     
     export_provenance_json(cbs_res, ver_res)
     serialize_cbs_to_hdf5(Path("cochem_state.h5"), thermo_res)
