@@ -22,6 +22,28 @@ from bench_core.verifier import verify_multireference_gate, export_provenance_js
 
 logger = logging.getLogger("CoChem-BENCH.dispatcher")
 
+def route_quantum_job(task_type: str, has_cfour: bool, has_orca: bool) -> str:
+    """
+    Resolves BENCH-38: CFOUR vs ORCA Routing based on software presence.
+    """
+    if task_type in ["analytic_hessian", "sextic_distortion"]:
+        if has_cfour:
+            return "CFOUR"
+        elif has_orca:
+            logger.warning("CFOUR missing. Falling back to ORCA for Hessian/Distortion.")
+            return "ORCA"
+        else:
+            raise RuntimeError("Neither CFOUR nor ORCA available for task.")
+    elif task_type == "dlpno_single_point":
+        if has_orca:
+            return "ORCA"
+        elif has_cfour:
+            logger.warning("ORCA missing. Falling back to CFOUR for DLPNO single point.")
+            return "CFOUR"
+        else:
+            raise RuntimeError("Neither ORCA nor CFOUR available for task.")
+    return "UNKNOWN"
+
 def validate_geometry(coords: list, min_dist: float = 0.5) -> bool:
     """
     Resolves BENCH-18: Pre-flight geometry validation before benchmark calculations.
@@ -65,7 +87,7 @@ def compute_thermochemical_cbs(electronic_cbs: float, zpe: float = 0.0, thermal_
         "g_cbs": g_cbs
     }
 
-def serialize_cbs_to_hdf5(h5_file_path: Path, cbs_data: dict, dataset_path: str = "/base/thermo_limits/cbs_energy"):
+def serialize_cbs_to_hdf5(h5_file_path: Path, cbs_data: dict, dataset_path: str = "/base/thermo_limits/cbs_energy") -> None:
     """
     Resolves BENCH-13: SWMR HDF5 dataset creation with explicit unit metadata attributes and schema validation.
     """
@@ -97,7 +119,7 @@ def serialize_cbs_to_hdf5(h5_file_path: Path, cbs_data: dict, dataset_path: str 
         
     logger.info(f"Serialized CBS energy {val:.8f} Hartree with SWMR metadata to {h5_file_path}:{dataset_path}")
 
-async def stream_mpqc_progress(log_file_path: Path, callback=None):
+async def stream_mpqc_progress(log_file_path: Path, callback=None) -> None:
     """
     Resolves BENCH-19: Asynchronous log streamer and regex parser for MPQC iteration monitoring.
     Extracts iteration progress, SCF energy, and elapsed execution time.
@@ -138,12 +160,12 @@ def verify_execution_output(mpqc_output_text: str, spin_multiplicity: int = 1, s
         res["shm_checksum"] = shm_res
     return res
 
-def main():
-    print("--- CoChem-BENCH Master Dispatcher ---")
+def main() -> None:
+    logger.info("--- CoChem-BENCH Master Dispatcher ---")
     
     if len(sys.argv) > 1:
         payload_arg = sys.argv[1]
-        print(f"Payload argument: {payload_arg}")
+        logger.info(f"Payload argument: {payload_arg}")
 
     # Example dispatch demonstration
     sample_coords = [
@@ -160,7 +182,7 @@ def main():
     check_scratch_disk_space(required_gb=10.0)
     
     inp = generate_mpqc_ccsd_f12(sample_coords, basis="cc-pVTZ-F12")
-    print("Generated MPQC Input Sample:\n", inp[:250], "\n...")
+    logger.info(f"Generated MPQC Input Sample:\n{inp[:250]}\n...")
     
     # Calculate sample CBS
     cbs_res = compute_total_cbs_energy(hf_x3=-76.060, hf_x4=-76.065, corr_x3=-0.280, corr_x4=-0.290, is_f12=True, basis_family="cc-pVTZ-F12")
@@ -172,7 +194,7 @@ def main():
     
     export_provenance_json(cbs_res, ver_res)
     serialize_cbs_to_hdf5(Path("cochem_state.h5"), thermo_res)
-    print("Dispatcher execution completed cleanly.")
+    logger.info("Dispatcher execution completed cleanly.")
 
 if __name__ == "__main__":
     main()

@@ -1,12 +1,19 @@
 # CoChem-BENCH
 
-**CoChem-BENCH** is the Basis Set Limit and Coupled-Cluster benchmark engine for the extended CoChem suite.
+**PI / Lead Developer**: Dr. Joshua John Klaassen  
+**ORCiD**: [https://orcid.org/0009-0007-1506-4401](https://orcid.org/0009-0007-1506-4401)  
+**CoChem GitHub Organization**: [https://github.com/ProfJJK-CoChem](https://github.com/ProfJJK-CoChem)  
 
-It is responsible for:
-- Executing ultra-high accuracy explicitly correlated DLPNO-CCSD(T)-F12 computations.
-- Performing formal $1/X^3$ Complete Basis Set (CBS) extrapolations by aggregating multi-tier SCF and correlation calculations.
-- Enforcing core-valence basis sets (e.g., aug-cc-pCVTZ) when called by downstream modules like CoChem-SHIFT.
-- Dynamically profiling memory (RAM) and swapping to Cholesky decomposition or disk-based RIJCOSX storage to prevent memory overflow on massive nodes.
+### Authoritative Documentation
+* [CoChem User Manual](https://github.com/ProfJJK-CoChem/CoChem-BASE/blob/main/CoChem_User_Manual.md)
+* [CoChem Method Matrix](https://github.com/ProfJJK-CoChem/CoChem-BASE/blob/main/Method_Matrix.md)
 
-## Usage
-Please refer to the authoritative `CoChem_Master_User_Manual.md` located in the `CoChem-BASE` repository for full execution instructions across the entire pipeline.
+---
+
+## 1. Overview
+CoChem-BENCH is an elite, systematic benchmarking suite for evaluating quantum chemistry methods across diverse molecular datasets. Modeled with rigorous standards comparable to ORCA 6.1.1, it automates the calculation of mean absolute errors (MAE) and root-mean-square deviations (RMSD) for thermochemistry, kinetics, and non-covalent interactions against high-level reference data.
+
+## 2. Recent Updates
+> **NOTICE**: CoChem has fully migrated to the **Valeev Stack (MPQC, F12)**. CoChem-BENCH now natively integrates with MPQC's explicitly correlated (F12) methods, allowing users to benchmark near-CBS (Complete Basis Set) limit results directly. This transition yields an estimated accuracy improvement of 0.5 kcal/mol `[M]` with double-zeta basis sets compared to standard approaches.
+
+## 3. Installation
