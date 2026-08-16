@@ -3,9 +3,14 @@ README.md
 pyproject.toml
 bench_core/__init__.py
 bench_core/basis_manager.py
+bench_core/bench_executor.py
+bench_core/bench_orchestrator.py
 bench_core/dispatcher.py
 bench_core/extrapolate.py
+bench_core/mpqc_input_builder.py
+bench_core/mpqc_writer.py
 bench_core/orca_writer.py
+bench_core/output_parser.py
 bench_core/ram_estimator.py
 bench_core/verifier.py
 cochem_bench.egg-info/PKG-INFO
@@ -15,4 +20,5 @@ cochem_bench.egg-info/requires.txt
 cochem_bench.egg-info/top_level.txt
 tests/test_bench_core.py
 tests/test_extrapolate.py
+tests/test_m3_verification.py
 tests/test_ram_estimator.py

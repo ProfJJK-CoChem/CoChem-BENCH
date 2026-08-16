@@ -10,9 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from bench_core.ram_estimator import estimate_ccsd_memory, set_storage_strategy, check_scratch_disk_space
+from cochem_bench.ram_estimator import estimate_ccsd_memory, set_storage_strategy, check_scratch_disk_space
 
-def test_ram_estimation_analytical():
+def test_ram_estimation_analytical() -> None:
     # BENCH-03: Small system memory test
     mem_small = estimate_ccsd_memory(n_basis=50, n_elec=10, n_procs=1)
     assert isinstance(mem_small, float)
@@ -22,7 +22,7 @@ def test_ram_estimation_analytical():
     mem_large = estimate_ccsd_memory(n_basis=2000, n_elec=50, n_procs=16)
     assert mem_large > 100.0  # Should require >100 GB
 
-def test_storage_strategy_fallback():
+def test_storage_strategy_fallback() -> None:
     # BENCH-12: Test fallbacks and TightPNO assignment
     strat_incore = set_storage_strategy(memory_gb=10.0, node_max_gb=64.0, n_procs=8)
     assert strat_incore["strategy"] == "INCORE"
@@ -33,7 +33,7 @@ def test_storage_strategy_fallback():
     assert strat_disk["pno_cutoff"] == "TightPNO"
     assert strat_disk["swap_fallback_triggered"] is True
 
-def test_check_scratch_disk_space():
+def test_check_scratch_disk_space() -> None:
     # BENCH-11: Check scratch disk space validation
     has_space = check_scratch_disk_space(required_gb=0.001)
     assert has_space is True
