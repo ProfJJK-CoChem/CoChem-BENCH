@@ -2,9 +2,9 @@
 CoChem-BENCH ORCA Input Generator & Counterpoise Engine
 Generates DLPNO-CCSD(T)-F12 inputs, Boys-Bernardi counterpoise inputs, and relativistic specifications.
 """
-from typing import List, Tuple, Dict, Any, Union
+from typing import Any
 
-def inspect_basis_set_cp_capability(basis: str) -> Dict[str, Any]:
+def inspect_basis_set_cp_capability(basis: str) -> dict[str, Any]:
     """
     Inspects basis set augmentation for CP-OPT safety and BSSE accuracy.
     """
@@ -17,7 +17,7 @@ def inspect_basis_set_cp_capability(basis: str) -> Dict[str, Any]:
     }
 
 def generate_dlpno_ccsd_f12(
-    coords: List[Union[Tuple[str, float, float, float], List[Any]]],
+    coords: list[tuple[str, float, float, float] | list[Any]],
     basis: str = "aug-cc-pVTZ",
     is_opt: bool = False,
     in_hess: str = "XTB2",
@@ -31,7 +31,7 @@ def generate_dlpno_ccsd_f12(
     Generates Method Matrix v4 compliant ORCA DLPNO-CCSD(T)-F12 input string.
     """
     # Detect heavy elements (Z >= 36, e.g. I, Br, Xe, etc.)
-    has_heavy = any(str(c[0]).capitalize() in ["I", "Br", "Xe", "Kr", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te"] for c in coords)
+    has_heavy = any(str(c[0]).rstrip(':').capitalize() in ["I", "Br", "Xe", "Kr", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te"] for c in coords)
     
     effective_rel = rel_mode
     if rel_mode == "auto":
@@ -49,8 +49,13 @@ def generate_dlpno_ccsd_f12(
     keywords.append("DLPNO-CCSD(T)-F12")
     keywords.append(effective_basis)
     keywords.append("CABS")
+    
+    # Method Matrix Quick Start Recipe R2 dictates DefGrid3 and TightOpt for geometries
+    # DLPNO-CCSD(T) lacks analytic gradients. Using DefGrid1 with numerical gradients
+    # produces catastrophic numerical noise. Enforcing TightOpt + DefGrid3.
     if is_opt:
-        keywords.append("DefGrid1")
+        keywords.append("TightOpt")
+        keywords.append("DefGrid3")
     else:
         keywords.append("DefGrid3")
     
@@ -88,8 +93,8 @@ def generate_dlpno_ccsd_f12(
     return "\n".join(lines) + "\n"
 
 def generate_counterpoise_input(
-    frag_a: List[Union[Tuple[str, float, float, float], List[Any]]],
-    frag_b: List[Union[Tuple[str, float, float, float], List[Any]]],
+    frag_a: list[tuple[str, float, float, float] | list[Any]],
+    frag_b: list[tuple[str, float, float, float] | list[Any]],
     basis: str = "aug-cc-pVTZ",
     is_opt: bool = False,
     in_hess: str = "XTB2",
@@ -97,7 +102,7 @@ def generate_counterpoise_input(
     charge: int = 0,
     mult: int = 1,
     nprocs: int = 1
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Generates Boys-Bernardi counterpoise ORCA inputs for complex, monomer A, and monomer B.
     """
@@ -148,7 +153,7 @@ def compute_counterpoise_corrected_energy(
     e_monomer_b_cp: float,
     e_monomer_a_raw: float,
     e_monomer_b_raw: float
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Computes CP-corrected interaction energy and BSSE correction in Hartree.
     """
@@ -159,3 +164,41 @@ def compute_counterpoise_corrected_energy(
         "e_bsse_hartree": e_bsse,
         "delta_e_raw_hartree": e_complex - e_monomer_a_raw - e_monomer_b_raw
     }
+
+def generate_isotopologue_freq_input(
+    parent_hess_path: str,
+    coords: list[tuple[str, float, float, float] | list[Any]],
+    mass_substitutions: dict[int, float],
+    charge: int = 0,
+    mult: int = 1,
+    nprocs: int = 1
+) -> str:
+    """
+    Implements the 'Zero-Cost' Electronic Structure shortcut for isotopologues
+    (Method Matrix Row 9). By reading an existing .hess file and substituting 
+    atomic masses, vibrational frequencies and rotational constants (Product B/C)
+    are re-computed without any new SCF or gradient evaluations.
+    This delivers a 6-15x efficiency gain on isotopologue campaigns.
+    
+    mass_substitutions: Dict mapping 0-indexed atom index to new atomic mass.
+    """
+    lines = ["! Freq"]
+    
+    if nprocs > 1:
+        lines.append(f"%pal nprocs {nprocs} end")
+        
+    lines.append("%freq")
+    lines.append(f'  InHessName "{parent_hess_path}"')
+    if mass_substitutions:
+        lines.append("  Mass")
+        for idx, new_mass in mass_substitutions.items():
+            lines.append(f"    {idx} {new_mass:.5f}")
+        lines.append("  end")
+    lines.append("end")
+    
+    lines.append(f"* xyz {charge} {mult}")
+    for c in coords:
+        lines.append(f"  {c[0]}  {c[1]:12.8f}  {c[2]:12.8f}  {c[3]:12.8f}")
+    lines.append("*")
+    
+    return "\n".join(lines) + "\n"

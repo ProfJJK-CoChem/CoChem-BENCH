@@ -5,28 +5,32 @@ Validates multi-reference diagnostics, Rule 7 provenance discipline, frozen-core
 import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 from pydantic import BaseModel, Field
 
 class ProvenancePayload(BaseModel):
-    input: Dict[str, Any]
-    results: Dict[str, Any]
-    provenance_tags: Dict[str, str]
-    accuracy_claims: List[Dict[str, Any]]
+    input: dict[str, Any]
+    results: dict[str, Any]
+    provenance_tags: dict[str, str]
+    accuracy_claims: list[dict[str, Any]]
     orca_version: str
-    rule_7_compliance: Dict[str, Any] = Field(default_factory=dict)
-    frozen_core_audit: List[Dict[str, Any]] = Field(default_factory=list)
+    rule_7_compliance: dict[str, Any] = Field(default_factory=dict)
+    frozen_core_audit: list[dict[str, Any]] = Field(default_factory=list)
 
-def verify_multireference_gate(orca_output: str, spin_multiplicity: int = 1) -> Dict[str, Any]:
+def verify_multireference_gate(orca_output: str, spin_multiplicity: int = 1) -> dict[str, Any]:
     """
     Evaluates T1 and D1 diagnostic values against threshold gates.
     """
     t1_match = re.search(r"T1\s+diagnostic\s*:\s*([0-9\.]+)", orca_output)
     d1_match = re.search(r"D1\s+diagnostic\s*:\s*([0-9\.]+)", orca_output)
     
-    t1 = float(t1_match.group(1)) if t1_match else 0.0
-    d1 = float(d1_match.group(1)) if d1_match else 0.0
+    if not t1_match or not d1_match:
+        raise ValueError("T1 or D1 diagnostic not found in ORCA output")
+        
+    t1 = float(t1_match.group(1))
+    d1 = float(d1_match.group(1))
     
     t1_thresh = 0.045 if spin_multiplicity > 1 else 0.020
     d1_thresh = 0.070 if spin_multiplicity > 1 else 0.050
@@ -41,7 +45,7 @@ def verify_multireference_gate(orca_output: str, spin_multiplicity: int = 1) -> 
         "status": "PASSED" if passed else "MULTIREFERENCE_WARNING"
     }
 
-def audit_frozen_core_bias(claimed_error_pct: float, has_core_valence: bool = False) -> Dict[str, Any]:
+def audit_frozen_core_bias(claimed_error_pct: float, has_core_valence: bool = False) -> dict[str, Any]:
     """
     Audits accuracy claims <= 0.5% to ensure core-valence basis was evaluated.
     Unaccounted frozen-core correlation introduces a systematic -0.81% bias in rotational constants.
@@ -82,7 +86,7 @@ def check_dispersion_correction(method: str, is_weak_complex: bool) -> None:
     if is_weak_complex and is_dft and not has_dispersion:
         raise ValueError(f"Dispersion correction (D3/D4) is mandatory for DFT optimizations of weak complexes. Method: {method}")
 
-def validate_standing_rule_7(payload: Dict[str, Any]) -> Dict[str, Any]:
+def validate_standing_rule_7(payload: dict[str, Any]) -> dict[str, Any]:
     """
     Enforces Standing Rule 7: Derived [D] and Estimated [E] claims must have explicit measured [M] anchor.
     """
@@ -94,7 +98,7 @@ def validate_standing_rule_7(payload: Dict[str, Any]) -> Dict[str, Any]:
         key = c.get("metric_key", "")
         tag = tags.get(key, "")
         if tag in ["[D]", "[E]"]:
-            if not c.get("has_measured_anchor", True):
+            if not c.get("has_measured_anchor", False):
                 violations.append(f"Unanchored {tag} claim for metric '{key}' ({c.get('name', '')})")
     
     return {
@@ -106,36 +110,36 @@ def get_active_orca_version() -> str:
     """
     Returns active ORCA runtime version stamp.
     """
-    return "ORCA 6.0.0 (x86_64 Linux/Windows HPC)"
+    result = subprocess.run(["orca"], capture_output=True, text=True)
+    output = result.stdout if result.stdout else result.stderr
+    version_match = re.search(r"ORCA\s+version\s+([^\s]+)", output, re.IGNORECASE)
+    if version_match:
+        return f"ORCA {version_match.group(1)}"
+    raise ValueError("ORCA version could not be matched in output")
 
-def verify_openmpi_shm_checksum(data: bytes) -> Dict[str, Any]:
+def verify_openmpi_shm_checksum(data: bytes, expected_checksum: str) -> dict[str, Any]:
     """
     Computes and verifies SHA256 integrity checksum for shared-memory tensor buffers.
     """
     sha = hashlib.sha256(data).hexdigest()
+    passed = (sha.lower() == expected_checksum.lower())
     return {
-        "passed": True,
+        "passed": passed,
         "checksum": sha,
+        "expected_checksum": expected_checksum,
         "bytes_checked": len(data)
     }
 
 def export_provenance_json(
-    input_dict: Dict[str, Any],
-    results_dict: Dict[str, Any],
-    output_path: Optional[Path] = None,
-    accuracy_claims: Optional[List[Dict[str, Any]]] = None
-) -> Dict[str, Any]:
+    input_dict: dict[str, Any],
+    results_dict: dict[str, Any],
+    provenance_tags: dict[str, str],
+    output_path: Path | None = None,
+    accuracy_claims: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """
     Exports full provenance JSON package with Method Matrix v4 tagging discipline.
     """
-    provenance_tags = {
-        "hf_cbs_energy_hartree": "[D]",
-        "corr_cbs_energy_hartree": "[D]",
-        "total_cbs_energy_hartree": "[D]",
-        "t1_diagnostic": "[M]",
-        "d1_diagnostic": "[M]"
-    }
-    
     payload = ProvenancePayload(
         input=input_dict,
         results=results_dict,

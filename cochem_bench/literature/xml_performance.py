@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 import tracemalloc
 import time
 import os
-from typing import Tuple, Dict, Any
+from typing import Any
 
 class MemoryLimitExceeded(Exception):
     """Exception raised when memory usage exceeds the specified limit."""
@@ -11,7 +11,7 @@ class XMLParsingBenchmark:
     """
     Benchmarks XML parsing, focusing on memory constraints and execution time.
     """
-    def __init__(self, memory_limit_mb: float = 2048.0):
+    def __init__(self, memory_limit_mb: float = 2048.0) -> None:
         self.memory_limit_mb = memory_limit_mb
         self.memory_limit_bytes = memory_limit_mb * 1024 * 1024
         self.peak_memory_bytes = 0
@@ -35,16 +35,14 @@ class XMLParsingBenchmark:
             
             for event, elem in context:
                 if event == 'end':
-                    # Simulate some reading work
-                    _ = elem.tag
-                    _ = elem.text
-                    
                     # Free memory for the element
                     elem.clear()
+                    root.clear()
                     
                     # Periodically check memory limit (to fail fast on huge files)
                     current, peak = tracemalloc.get_traced_memory()
                     if peak > self.memory_limit_bytes:
+                        self.peak_memory_bytes = peak
                         raise MemoryLimitExceeded(
                             f"Peak memory usage ({peak / (1024*1024):.2f} MB) "
                             f"exceeded limit of {self.memory_limit_mb} MB"
@@ -65,16 +63,19 @@ class XMLParsingBenchmark:
                 
         finally:
             self.execution_time = time.time() - start_time
+            current, peak = tracemalloc.get_traced_memory()
+            if peak > self.peak_memory_bytes:
+                self.peak_memory_bytes = peak
             tracemalloc.stop()
             
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         return {
             "peak_memory_mb": self.peak_memory_bytes / (1024 * 1024),
             "execution_time_seconds": self.execution_time,
             "memory_limit_mb": self.memory_limit_mb
         }
 
-def validate_xml_memory_usage(filepath: str, memory_limit_mb: float = 2048.0) -> Tuple[bool, Dict[str, Any]]:
+def validate_xml_memory_usage(filepath: str, memory_limit_mb: float = 2048.0) -> tuple[bool, dict[str, Any]]:
     """
     Validates that parsing the given XML file does not exceed the specified memory limit.
     Returns a tuple of (is_valid, stats_dict).
@@ -87,5 +88,5 @@ def validate_xml_memory_usage(filepath: str, memory_limit_mb: float = 2048.0) ->
         stats = benchmark.get_stats()
         stats["error"] = str(e)
         return False, stats
-    except Exception as e:
+    except (FileNotFoundError, ET.ParseError, OSError) as e:
         return False, {"error": str(e)}

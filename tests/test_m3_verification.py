@@ -8,14 +8,10 @@ import json
 import tempfile
 import pytest
 from pathlib import Path
-import sys
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cochem_bench.orca_writer import (
     generate_dlpno_ccsd_f12,
     generate_counterpoise_input,
-    inspect_basis_set_cp_capability,
 )
 from cochem_bench.verifier import (
     export_provenance_json,
@@ -28,10 +24,10 @@ from cochem_bench.ram_estimator import (
 )
 
 # Shared test fixtures
-COORDS = [("O", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 0.96)]
-FRAG_A = [("O", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 0.96)]
-FRAG_B = [("H", 2.0, 0.0, 0.0), ("Cl", 3.2, 0.0, 0.0)]
-WORKFLOW_DOC_PATH = Path(__file__).resolve().parents[1] / "20260807_bench_workflow.md"
+COORDS: list[tuple[str, float, float, float]] = [("O", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 0.96)]
+FRAG_A: list[tuple[str, float, float, float]] = [("O", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 0.96)]
+FRAG_B: list[tuple[str, float, float, float]] = [("H", 2.0, 0.0, 0.0), ("Cl", 3.2, 0.0, 0.0)]
+WORKFLOW_DOC_PATH: Path = Path(__file__).resolve().parents[1] / "20260807_bench_workflow.md"
 
 
 # ==============================================================================

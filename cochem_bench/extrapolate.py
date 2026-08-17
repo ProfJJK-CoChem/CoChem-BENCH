@@ -3,8 +3,6 @@ CoChem-BENCH Extrapolation Algorithms
 Complete Basis Set (CBS) Extrapolations (Halkier, F12, Karton-Martin, Feller).
 """
 import math
-from typing import Dict, Any
-
 def calculate_halkier(corr_x3: float, corr_x4: float) -> float:
     """
     Halkier 1/X^3 two-point correlation energy CBS extrapolation for T/Q zeta.
@@ -46,7 +44,7 @@ def compute_total_cbs_energy(
     corr_x4: float,
     is_f12: bool = True,
     basis_family: str = "aug-cc-pVXZ"
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Computes total CBS energy combining HF and correlation components.
     """

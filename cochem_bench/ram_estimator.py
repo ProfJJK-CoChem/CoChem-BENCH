@@ -4,7 +4,7 @@ Estimates CCSD memory, storage strategy switching, GPU VRAM requirements, and sc
 """
 import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
 
 def estimate_ccsd_memory(
     n_basis: int,
@@ -39,7 +39,7 @@ def estimate_ccsd_memory_detailed(
     is_open_shell: bool = False,
     gpu_available: bool = False,
     gpu_mem_gb: float = 16.0
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Detailed memory breakdown including CPU, GPU VRAM, and engine-specific overhead.
     """
@@ -64,7 +64,10 @@ def estimate_ccsd_memory_detailed(
     # GPU4PySCF full 4-center integral VRAM estimation
     gpu_vram_gb = ((n_basis ** 4) * 8.0) / (1024.0 ** 3)
     gpu_overflow = gpu_vram_gb > gpu_mem_gb
-    recommendation = "CPU_FALLBACK" if gpu_overflow else "GPU_ACCELERATED"
+    if not gpu_available:
+        recommendation = "CPU_ONLY"
+    else:
+        recommendation = "CPU_FALLBACK" if gpu_overflow else "GPU_ACCELERATED"
 
     return {
         "cpu_memory_gb": float(base_cpu_gb),
@@ -74,11 +77,12 @@ def estimate_ccsd_memory_detailed(
         "recommendation": recommendation
     }
 
-def set_storage_strategy(memory_gb: float, node_max_gb: float = 64.0, n_procs: int = 8) -> Dict[str, Any]:
+def set_storage_strategy(memory_gb: float, node_max_gb: float = 64.0, n_procs: int = 8) -> dict[str, Any]:
     """
     Selects INCORE vs RIJCOSX_DISK storage strategy based on memory ceiling.
     """
-    if memory_gb <= node_max_gb:
+    effective_max_gb = node_max_gb - (0.5 * n_procs)
+    if memory_gb <= effective_max_gb:
         return {
             "strategy": "INCORE",
             "pno_cutoff": "NormalPNO",
@@ -95,20 +99,21 @@ def calculate_dynamic_maxcore(nprocs: int = 4, node_max_gb: float = 16.0) -> int
     """
     Calculates per-process maxcore in MB leaving headroom for OS and MPI runtime.
     """
+    n = max(1, nprocs)
     available_mb = node_max_gb * 1024.0 * 0.75
-    per_proc_mb = int(available_mb / max(1, nprocs))
-    return max(1000, per_proc_mb)
+    per_proc_mb = int(available_mb / n)
+    candidate = max(1000, per_proc_mb)
+    max_allowed = int((node_max_gb * 1024.0) / n)
+    return min(candidate, max_allowed)
 
-def check_scratch_disk_space(required_gb: float, scratch_path: Optional[str] = None) -> bool:
+def check_scratch_disk_space(required_gb: float, scratch_path: str | None = None) -> bool:
     """
     Checks if scratch disk space is sufficient. Safe exception handling for invalid paths.
     """
     try:
         target = Path(scratch_path) if scratch_path else Path.cwd()
-        if not target.exists():
-            return False
         usage = shutil.disk_usage(str(target))
         free_gb = usage.free / (1024.0 ** 3)
         return free_gb >= required_gb
-    except Exception:
-        return False
+    except OSError as e:
+        raise FileNotFoundError(f"Error checking disk space: {e}") from e

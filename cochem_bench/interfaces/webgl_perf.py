@@ -5,7 +5,7 @@ WebGL and UI Rendering Performance Monitor for CoChem-BENCH.
 Strictly adheres to Anti-Spoofing Directives: never simulates rendering bottlenecks with synthetic CPU math loops.
 """
 
-from typing import Tuple, Optional
+import collections
 import logging
 import time
 
@@ -22,21 +22,19 @@ class WebGLPerformanceTracker:
         self.fps_threshold = fps_threshold
         self.current_fps: float = 0.0
         self.is_svg_fallback_active: bool = False
-        self._frame_times = []
+        self._frame_times: collections.deque[float] = collections.deque(maxlen=120)
 
     def record_frame(self, frame_duration_seconds: float) -> None:
         """Records an actual empirical frame duration from the rendering viewport."""
         if frame_duration_seconds <= 0:
             return
         self._frame_times.append(frame_duration_seconds)
-        if len(self._frame_times) > 120:
-            self._frame_times.pop(0)
             
         avg_time = sum(self._frame_times) / len(self._frame_times)
         self.current_fps = 1.0 / avg_time if avg_time > 0 else 0.0
         self.is_svg_fallback_active = (self.current_fps < self.fps_threshold)
 
-    def evaluate_performance(self, measured_fps: Optional[float] = None) -> Tuple[bool, float]:
+    def evaluate_performance(self, measured_fps: float | None = None) -> tuple[bool, float]:
         """
         Evaluates rendering performance using measured hardware FPS.
         If no hardware metrics are available (e.g. headless CI), reports 0.0 and triggers SVG fallback safely.
