@@ -1,3 +1,5 @@
+import logging
+logging.basicConfig(level=logging.INFO)
 import sys
 import base64
 import os
@@ -14,10 +16,10 @@ def run_audit():
     try:
         from cochem_bench import llm_context
     except ImportError:
-        print("[FAIL] cochem_bench.llm_context module not found.")
+        logging.info("[FAIL] cochem_bench.llm_context module not found.")
         sys.exit(1)
 
-    print("Generating 40,000+ tokens of random Base64 strings...")
+    logging.info("Generating 40,000+ tokens of random Base64 strings...")
     system_prompt = "[SYSTEM PROMPT] You are a helpful assistant."
     last_user_request = "[LAST USER REQUEST] Please fix the CFOUR syntax."
     
@@ -39,30 +41,30 @@ def run_audit():
     messages.append({"role": "user", "content": last_user_request})
     
     total_input_tokens = sum(count_tokens(m["content"]) for m in messages)
-    print(f"Total tokens before processing: {total_input_tokens}")
+    logging.info(f"Total tokens before processing: {total_input_tokens}")
     
     try:
         result_messages = llm_context.build_message_queue(messages)
     except Exception as e:
-        print(f"[FAIL] Error running build_message_queue: {e}")
+        logging.info(f"[FAIL] Error running build_message_queue: {e}")
         sys.exit(1)
         
     total_tokens = sum(count_tokens(m["content"]) for m in result_messages)
-    print(f"Resulting tokens after processing: {total_tokens}")
+    logging.info(f"Resulting tokens after processing: {total_tokens}")
     
     if total_tokens > 32000:
-        print("[FAIL] Resulting token array > 32000.")
+        logging.info("[FAIL] Resulting token array > 32000.")
         sys.exit(1)
         
     if result_messages[0]["content"] != system_prompt:
-        print("[FAIL] System prompt not preserved.")
+        logging.info("[FAIL] System prompt not preserved.")
         sys.exit(1)
         
     if result_messages[-1]["content"] != last_user_request:
-        print("[FAIL] Last user request not preserved.")
+        logging.info("[FAIL] Last user request not preserved.")
         sys.exit(1)
         
-    print("[PASS] LLM context degradation audit passed.")
+    logging.info("[PASS] LLM context degradation audit passed.")
 
 if __name__ == "__main__":
     run_audit()

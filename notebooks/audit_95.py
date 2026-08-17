@@ -1,3 +1,5 @@
+import logging
+logging.basicConfig(level=logging.INFO)
 import sys
 import os
 from pathlib import Path
@@ -27,15 +29,15 @@ def test_write_speed():
     # Let's make it 2000 atoms to hit close to 1GB.
     N_ATOMS = 2200
     
-    print("Generating 1GB dummy trajectory dataset in RAM...")
+    logging.info("Generating 1GB dummy trajectory dataset in RAM...")
     coords = np.random.rand(n_steps, N_ATOMS, 3)
     energy = np.random.rand(n_steps)
     gradient = np.random.rand(n_steps, N_ATOMS, 3)
     
     size_mb = (coords.nbytes + energy.nbytes + gradient.nbytes) / (1024 * 1024)
-    print(f"Data size: {size_mb:.2f} MB")
+    logging.info(f"Data size: {size_mb:.2f} MB")
     
-    print("Writing to PESStore...")
+    logging.info("Writing to PESStore...")
     start_time = time.time()
     store.append_batch(coords, energy, gradient_batch=gradient)
     end_time = time.time()
@@ -43,17 +45,17 @@ def test_write_speed():
     write_time = end_time - start_time
     speed_mb_s = size_mb / write_time
     
-    print(f"Write time: {write_time:.2f} s")
-    print(f"Write speed: {speed_mb_s:.2f} MB/s")
+    logging.info(f"Write time: {write_time:.2f} s")
+    logging.info(f"Write speed: {speed_mb_s:.2f} MB/s")
     
     if store_path.exists():
         store_path.unlink()
         
     if speed_mb_s < 100:
-        print("FAIL: Write speed < 100 MB/s")
+        logging.info("FAIL: Write speed < 100 MB/s")
         sys.exit(1)
     else:
-        print("PASS: Write speed > 100 MB/s")
+        logging.info("PASS: Write speed > 100 MB/s")
         sys.exit(0)
 
 if __name__ == "__main__":

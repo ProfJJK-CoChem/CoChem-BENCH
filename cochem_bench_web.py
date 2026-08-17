@@ -5,7 +5,10 @@ import sys
 import psutil
 import atexit
 import hashlib
+import logging
 from pathlib import Path
+
+logging.basicConfig(level=logging.INFO)
 
 st.set_page_config(page_title="CoChem-BENCH - Native Pipeline UI", layout="wide")
 
@@ -13,11 +16,12 @@ def kill_zombie_processes() -> None:
     target_procs = ['orca', 'xtb', 'mpi', 'crest']
     for proc in psutil.process_iter(['name']):
         try:
-            name = proc.info['name'].lower()
-            if any(target in name for target in target_procs):
+            name = proc.info.get('name')
+            if name and any(target in name.lower() for target in target_procs):
                 proc.terminate()
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            raise NotImplementedError("Implementation pending")
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+            logging.warning(f"Failed to terminate zombie process: {e}")
+            continue
 atexit.register(kill_zombie_processes)
 
 st.title("🔬 CoChem-BENCH Control Panel")
@@ -39,7 +43,7 @@ if st.button("🚀 Execute Default Pipeline"):
         env["COCHEM_TARGET_H5"] = os.path.join(os.getcwd(), "landscape.h5")
         
         try:
-            cmd = [sys.executable, "-m", "pytest", str(tests_dir), "-v"]
+            cmd = [sys.executable, str(module_dir / 'cochem_bench' / 'dispatcher.py')]
             result = subprocess.run(
                 cmd, 
                 capture_output=True, 
@@ -55,7 +59,9 @@ if st.button("🚀 Execute Default Pipeline"):
             
             output_content = "Physical calculation completed.\nnormal and full termination\n"
             out_hash = hashlib.sha256(output_content.encode('utf-8')).hexdigest()
-            with open("physical_output.out", "w", encoding="utf-8") as f:
+            artifacts_dir = Path(os.environ.get("COCHEM_ARTIFACT_DIR", Path.home() / "cochem_artifacts"))
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+            with open(artifacts_dir / "physical_output.out", "w", encoding="utf-8") as f:
                 f.write(output_content)
                 
         except subprocess.TimeoutExpired:

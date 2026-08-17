@@ -1,7 +1,9 @@
+import logging
+logging.basicConfig(level=logging.INFO)
 import os
 import sys
 
-print("--- Running CoChem-BENCH Adversarial Audit 93 ---")
+logging.info("--- Running CoChem-BENCH Adversarial Audit 93 ---")
 
 # Add CoChem-NODE and CoChem-BENCH to path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -30,21 +32,21 @@ def run_audit():
             requested_cores=256
         )
         
-        print("\n--- Generated Batch Script ---")
-        print(script)
-        print("------------------------------")
+        logging.info("\n--- Generated Batch Script ---")
+        logging.info(script)
+        logging.info("------------------------------")
         
         if "mpirun -np 256" in script or "srun" in script:
-            print("\n[VERIFICATION] PASS: Multi-Node HPC Routing identified, mpirun wrapper present.")
+            logging.info("\n[VERIFICATION] PASS: Multi-Node HPC Routing identified, mpirun wrapper present.")
         elif "OMP_NUM_THREADS=256" in script:
-            print("\n[VERIFICATION] FAIL: System attempted to spawn 256 OpenMP threads. Severe context-switching overhead!")
+            logging.info("\n[VERIFICATION] FAIL: System attempted to spawn 256 OpenMP threads. Severe context-switching overhead!")
         else:
-            print("\n[VERIFICATION] FAIL: Neither mpirun -np 256 nor OMP_NUM_THREADS=256 found. Check resource throttling.")
+            logging.info("\n[VERIFICATION] FAIL: Neither mpirun -np 256 nor OMP_NUM_THREADS=256 found. Check resource throttling.")
             if "OMP_NUM_THREADS=64" in script:
-                print("Note: The system throttled the request down to 64 cores instead of deploying a Multi-Node job.")
+                logging.info("Note: The system throttled the request down to 64 cores instead of deploying a Multi-Node job.")
 
     except Exception as e:
-        print(f"\n[ERROR] Audit execution failed: {e}")
+        logging.info(f"\n[ERROR] Audit execution failed: {e}")
 
 if __name__ == "__main__":
     run_audit()

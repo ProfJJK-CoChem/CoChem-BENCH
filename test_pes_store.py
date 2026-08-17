@@ -1,9 +1,11 @@
+import logging
+logging.basicConfig(level=logging.INFO)
 import os
 import numpy as np
 from cochem_bench.core.storage_io import PESStore
 
 def test():
-    print("Testing PESStore...")
+    logging.info("Testing PESStore...")
     filepath = "test_pes.h5"
     if os.path.exists(filepath):
         os.remove(filepath)
@@ -13,17 +15,17 @@ def test():
     energies = np.array([-1.0, -1.2])
     attrs = {"method": "DFT", "basis": "6-31G*"}
     
-    print("Saving PES...")
+    logging.info("Saving PES...")
     store.save_pes("mol1", coords, energies, attrs)
     
-    print("Loading PES...")
+    logging.info("Loading PES...")
     loaded_coords, loaded_energies, loaded_attrs = store.load_pes("mol1")
     
     assert np.allclose(coords, loaded_coords), "Coordinates mismatch"
     assert np.allclose(energies, loaded_energies), "Energies mismatch"
     assert attrs == loaded_attrs, "Attributes mismatch"
     
-    print("Test passed successfully. Import and execution SUCCESS.")
+    logging.info("Test passed successfully. Import and execution SUCCESS.")
     
     if os.path.exists(filepath):
         os.remove(filepath)
