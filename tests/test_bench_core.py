@@ -104,7 +104,6 @@ def test_scratch_disk_space_exception_safety() -> None:
 
 
 
-@pytest.mark.skipif(shutil.which('orca') is None, reason="ORCA not installed")
 def test_provenance_json_dynamic_version() -> None:
     ver: str = get_active_orca_version()
     assert "ORCA" in ver
