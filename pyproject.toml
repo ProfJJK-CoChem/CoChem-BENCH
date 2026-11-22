@@ -4,16 +4,29 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cochem-bench"
-version = "0.1.0"
-description = "CoChem-BENCH: Complete Basis Set (CBS) Extrapolation and High-Level Quantum Benchmarking"
-authors = [{ name = "CoChem Development Team" }]
-readme = "README.md"
-requires-python = ">=3.9"
-dependencies = [
-    "numpy",
-    "scipy",
-    "h5py"
+version = "0.2.0"
+description = "CoChem-BENCH: Complete Basis Set (CBS) Extrapolation, Composite Thermochemistry, and Real ORCA Output Parsing"
+authors = [
+    { name = "Dr. Joshua John Klaassen, Tennessee Tech University" },
 ]
+license = { text = "Apache-2.0" }
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "pydantic>=2.4",
+]
+
+[project.optional-dependencies]
+hdf5 = ["h5py>=3.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+cochem-bench = "cochem_bench.cli:main"
+
+[project.entry-points."cochem.modules"]
+bench = "cochem_bench.provider:bench_provider"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -22,9 +35,8 @@ include = ["cochem_bench*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-
 [tool.ruff]
-line-length = 88
+line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]

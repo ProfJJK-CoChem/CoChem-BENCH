@@ -5,7 +5,6 @@ Validates geometries, aggregates thermochemical CBS corrections, and manages HDF
 import math
 from pathlib import Path
 from typing import Any
-import h5py
 
 def validate_geometry(coords: list[tuple[str, float, float, float]]) -> bool:
     """
@@ -57,6 +56,8 @@ def serialize_cbs_to_hdf5(filepath: str | Path, data: dict[str, Any]) -> None:
     """
     Serializes thermochemical benchmark state to HDF5 file.
     """
+    import h5py
+
     p = Path(filepath)
     p.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(p, "w", libver="latest") as f:
