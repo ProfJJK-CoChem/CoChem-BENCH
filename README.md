@@ -35,6 +35,10 @@ cochem-bench parse-orca path/to/orca.out
 cochem-bench cbs --e-scf-x -76.057133912 --e-scf-y -76.064825000 --e-corr-x -0.267422659 --e-corr-y -0.286950000 -x 3 -y 4 --basis-family cc-pVnZ
 ```
 
-## 4. License
+## 4. Documentation & User Guide
+
+- **[User Guide (`docs/USER_GUIDE.md`)](docs/USER_GUIDE.md)** — Worked CLI and Python examples covering `cochem-bench parse-orca`, Helgaker/Neese–Valeev/F12 CBS extrapolation, composite thermochemistry & relative energy ranking, diagnostics auditing, and CHEM 490 professor-return parsing.
+
+## 5. License
 
 Licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) for full terms.
