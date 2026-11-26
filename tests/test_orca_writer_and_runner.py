@@ -380,3 +380,80 @@ def test_relativistic_basis_swap_emits_warning_provenance_comment_and_metadata()
         )
     assert cp_res["basis_provenance"]["effective_basis"] == "DKH-def2-SVP"
     assert cp_res["basis_provenance"]["basis_swapped"] is True
+
+
+def test_build_orca_env_prepends_discovered_openmpi_bin_and_lib(tmp_path: Path) -> None:
+    """DEF-S1-04 regression: _build_orca_env must prepend OpenMPI bin/ to PATH and lib/ to LD_LIBRARY_PATH."""
+    from cochem_bench.orca_runner import _build_orca_env
+
+    engines = tmp_path / "engines"
+    orca_dir = engines / "orca-native-v1" / "orca_6_1_1_linux"
+    mpi_root = engines / "openmpi4.1.8-native-v1"
+    mpi_bin = mpi_root / "bin"
+    mpi_lib = mpi_root / "lib"
+    custom_mpi_bin = tmp_path / "custom_mpi" / "bin"
+    custom_mpi_lib = tmp_path / "custom_mpi" / "lib"
+    for folder in (orca_dir, mpi_bin, mpi_lib, custom_mpi_bin, custom_mpi_lib):
+        folder.mkdir(parents=True)
+    orca_bin = orca_dir / "orca"
+    orca_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    custom_mpirun = custom_mpi_bin / "mpirun"
+    custom_mpirun.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    deck_pal2 = "! HF STO-3G\n%pal nprocs 2 end\n* xyz 0 1\nH 0 0 0\nH 0 0 0.74\n*\n"
+
+    # 1. Sibling openmpi*/bin and openmpi*/lib discovered automatically near ORCA binary
+    saved_env = {
+        k: os.environ.get(k)
+        for k in ("COCHEM_ORCA_MPIRUN_BIN", "ORCA_MPI_BIN", "COCHEM_MPIRUN_BIN", "COCHEM_MPIEXEC_BIN", "COCHEM_ORCA_LD_LIBRARY_PATH")
+    }
+    try:
+        for k in saved_env:
+            os.environ.pop(k, None)
+        env = _build_orca_env(orca_bin, deck_pal2)
+        path_entries = env["PATH"].split(os.pathsep)
+        assert str(orca_dir) == path_entries[0]
+        assert str(mpi_bin) in path_entries
+        assert env["OMP_NUM_THREADS"] == "1"
+        if os.name == "posix":
+            ld_entries = env["LD_LIBRARY_PATH"].split(":")
+            assert str(mpi_lib) in ld_entries
+
+        # 2. Explicit COCHEM_ORCA_MPIRUN_BIN takes priority ahead of sibling directories
+        os.environ["COCHEM_ORCA_MPIRUN_BIN"] = str(custom_mpirun)
+        env2 = _build_orca_env(orca_bin, deck_pal2)
+        path_entries2 = env2["PATH"].split(os.pathsep)
+        assert path_entries2[0] == str(orca_dir)
+        assert path_entries2[1] == str(custom_mpi_bin)
+        assert str(mpi_bin) in path_entries2
+        if os.name == "posix":
+            ld_entries2 = env2["LD_LIBRARY_PATH"].split(":")
+            assert str(custom_mpi_lib) in ld_entries2
+    finally:
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_live_orca6_parallel_nprocs2_execution(tmp_path: Path) -> None:
+    """DEF-S1-04 live check: parallel nprocs=2 calculation succeeds with OpenMPI auto-discovery."""
+    if os.name != "posix":
+        pytest.skip("Parallel OpenMPI ORCA execution check targets Linux/WSL2 POSIX hosts")
+    orca_bin = _live_orca_binary_or_skip()
+    # HF has 4 correlated valence orbitals (10 pairs), satisfying ORCA_MDCI nprocs <= pairs.
+    hf = [("F", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 0.917)]
+    res = run_orca_calculation(
+        hf,
+        tmp_path / "hf_pal2",
+        basis="cc-pVDZ-F12",
+        is_opt=False,
+        nprocs=2,
+        job_name="hf_pal2",
+        orca_bin=orca_bin,
+    )
+    assert res.returncode == 0
+    assert res.orca_version.startswith("6.")
+    assert -100.60 < res.final_single_point_energy_eh < -100.30
+    assert res.audit["passed"] is True

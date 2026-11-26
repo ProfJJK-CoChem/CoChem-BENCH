@@ -156,32 +156,139 @@ def resolve_orca_binary(orca_bin: str | Path | None = None) -> Path:
     )
 
 
+def _parse_openmpi_paths_from_activate_script(script_path: Path) -> tuple[list[str], list[str]]:
+    """Extract OpenMPI bin and lib directories from activate_cochem_wsl.sh without executing it."""
+    bin_dirs: list[str] = []
+    lib_dirs: list[str] = []
+    if not script_path.is_file():
+        return bin_dirs, lib_dirs
+    try:
+        text = script_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return bin_dirs, lib_dirs
+
+    for key in ("COCHEM_ORCA_MPIRUN_BIN", "COCHEM_MPIRUN_BIN", "COCHEM_MPIEXEC_BIN", "ORCA_MPI_BIN"):
+        match = re.search(rf'(?m)^\s*export\s+{key}="([^"$]+)"', text)
+        if match:
+            candidate = Path(match.group(1)).expanduser()
+            bin_dir = candidate.parent if candidate.is_file() else (candidate if candidate.is_dir() else None)
+            if bin_dir is not None:
+                bin_dirs.append(str(bin_dir))
+                for lib_name in ("lib", "lib64"):
+                    sibling_lib = bin_dir.parent / lib_name
+                    if sibling_lib.is_dir():
+                        lib_dirs.append(str(sibling_lib))
+
+    ld_match = re.search(r'(?m)^\s*export\s+COCHEM_ORCA_LD_LIBRARY_PATH="([^"]+)"', text)
+    if ld_match:
+        for raw_entry in ld_match.group(1).split(":"):
+            entry = raw_entry.strip()
+            if not entry or "$" in entry:
+                continue
+            p = Path(entry).expanduser()
+            if p.is_dir():
+                lib_dirs.append(str(p))
+                if p.name in {"lib", "lib64"} and (p.parent / "bin").is_dir():
+                    bin_dirs.append(str(p.parent / "bin"))
+
+    return list(dict.fromkeys(bin_dirs)), list(dict.fromkeys(lib_dirs))
+
+
+def _discover_openmpi_dirs(orca_path: Path, env: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Discover OpenMPI bin/ and lib/ directories from env vars, sibling dirs, and workstation config."""
+    bin_dirs: list[str] = []
+    lib_dirs: list[str] = []
+
+    def _add_mpi_bin_candidate(raw_value: str) -> None:
+        cleaned = raw_value.strip()
+        if not cleaned:
+            return
+        candidate = Path(cleaned).expanduser()
+        if candidate.is_file():
+            bin_dir = candidate.parent
+        elif candidate.is_dir():
+            bin_dir = candidate
+        else:
+            return
+        bin_dirs.append(str(bin_dir))
+        for lib_name in ("lib", "lib64"):
+            sibling_lib = bin_dir.parent / lib_name
+            if sibling_lib.is_dir():
+                lib_dirs.append(str(sibling_lib))
+
+    def _add_mpi_root(root: Path) -> None:
+        if not root.is_dir():
+            return
+        b = root / "bin"
+        if b.is_dir():
+            bin_dirs.append(str(b))
+        for lib_name in ("lib", "lib64"):
+            l = root / lib_name
+            if l.is_dir():
+                lib_dirs.append(str(l))
+
+    # 1. Explicit MPI binary / bin-directory environment variables.
+    for env_key in ("COCHEM_ORCA_MPIRUN_BIN", "ORCA_MPI_BIN", "COCHEM_MPIRUN_BIN", "COCHEM_MPIEXEC_BIN"):
+        val = env.get(env_key, "")
+        if val:
+            _add_mpi_bin_candidate(val)
+
+    # 2. Explicit MPI installation root environment variables.
+    for env_key in ("ORCA_MPI_DIR", "OPENMPI_HOME", "MPI_HOME"):
+        val = env.get(env_key, "").strip()
+        if val:
+            _add_mpi_root(Path(val).expanduser())
+
+    # 3. Explicit COCHEM_ORCA_LD_LIBRARY_PATH (and infer sibling bin/ next to lib/).
+    cochem_ld = env.get("COCHEM_ORCA_LD_LIBRARY_PATH", "").strip()
+    if cochem_ld:
+        for entry in cochem_ld.split(":"):
+            cleaned = entry.strip()
+            if not cleaned:
+                continue
+            lib_dirs.append(cleaned)
+            p = Path(cleaned).expanduser()
+            if p.name in {"lib", "lib64"} and (p.parent / "bin").is_dir():
+                bin_dirs.append(str(p.parent / "bin"))
+
+    # 4. Auto-discover sibling openmpi* directories near the resolved ORCA binary.
+    search_roots: list[Path] = []
+    for ancestor in (orca_path.parent, orca_path.parent.parent, orca_path.parent.parent.parent):
+        if ancestor.is_dir() and ancestor.parent != ancestor and ancestor not in search_roots:
+            search_roots.append(ancestor)
+    for root in search_roots:
+        for mpi_root in sorted(root.glob("openmpi*"), reverse=True):
+            _add_mpi_root(mpi_root)
+
+    # 5. Workstation activation script & ~/CoChem_Workstation_Direct fallback.
+    ws_root = Path.home() / "CoChem_Workstation_Direct"
+    act_bins, act_libs = _parse_openmpi_paths_from_activate_script(ws_root / "activate_cochem_wsl.sh")
+    bin_dirs.extend(act_bins)
+    lib_dirs.extend(act_libs)
+    ws_engines = ws_root / "engines"
+    if ws_engines.is_dir():
+        for mpi_root in sorted(ws_engines.glob("openmpi*"), reverse=True):
+            _add_mpi_root(mpi_root)
+
+    return list(dict.fromkeys(bin_dirs)), list(dict.fromkeys(lib_dirs))
+
+
 def _build_orca_env(orca_path: Path, deck_text: str) -> dict[str, str]:
-    """Prepare subprocess environment for ORCA 6 including OpenMPI shared libraries."""
+    """Prepare subprocess environment for ORCA 6 including OpenMPI binaries and shared libraries."""
     env = os.environ.copy()
     orca_dir = str(orca_path.parent)
+    mpi_bin_dirs, mpi_lib_dirs = _discover_openmpi_dirs(orca_path, env)
 
-    path_parts = [orca_dir]
+    path_parts: list[str] = [orca_dir, *mpi_bin_dirs]
     if env.get("PATH"):
-        path_parts.append(env["PATH"])
-    env["PATH"] = os.pathsep.join(path_parts)
+        path_parts.extend(p for p in env["PATH"].split(os.pathsep) if p)
+    env["PATH"] = os.pathsep.join(dict.fromkeys(path_parts))
 
     if os.name == "posix":
-        ld_parts: list[str] = []
-        cochem_ld = env.get("COCHEM_ORCA_LD_LIBRARY_PATH", "").strip()
-        if cochem_ld:
-            ld_parts.extend(p for p in cochem_ld.split(":") if p)
-        # Auto-discover sibling OpenMPI runtime lib next to orca-native-* directories.
-        engines_root = orca_path.parent.parent.parent
-        if engines_root.is_dir():
-            for mpi_lib in sorted(engines_root.glob("openmpi*/lib")):
-                if mpi_lib.is_dir():
-                    ld_parts.append(str(mpi_lib))
-        ld_parts.append(orca_dir)
+        ld_parts: list[str] = [*mpi_lib_dirs, orca_dir]
         if env.get("LD_LIBRARY_PATH"):
             ld_parts.extend(p for p in env["LD_LIBRARY_PATH"].split(":") if p)
-        deduped_ld = list(dict.fromkeys(ld_parts))
-        env["LD_LIBRARY_PATH"] = ":".join(deduped_ld)
+        env["LD_LIBRARY_PATH"] = ":".join(dict.fromkeys(ld_parts))
 
     # Guard against OpenMP oversubscription when %pal nprocs > 1.
     pal_match = re.search(r"(?i)%pal\s+nprocs\s+(\d+)\s+end", deck_text)
