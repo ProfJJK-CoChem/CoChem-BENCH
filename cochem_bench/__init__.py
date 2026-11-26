@@ -31,6 +31,8 @@ from .orca_writer import (
     generate_canonical_ccsd_t,
     generate_counterpoise_input,
     generate_dlpno_ccsd_f12,
+    generate_dlpno_ccsd_f12_with_metadata,
+    resolve_relativistic_basis,
 )
 from .provider import BenchProvider, bench_provider, dispatch_operation, execute_handoff
 from .thermochemistry import (
@@ -63,8 +65,10 @@ __all__ = [
     "run_orca_input",
     "run_orca_calculation",
     "generate_dlpno_ccsd_f12",
+    "generate_dlpno_ccsd_f12_with_metadata",
     "generate_canonical_ccsd_t",
     "generate_counterpoise_input",
+    "resolve_relativistic_basis",
     "CompositeEnergyResult",
     "RelativeEnergyEntry",
     "RelativeEnergyTable",

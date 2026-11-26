@@ -24,8 +24,12 @@ from cochem_bench.orca_runner import (
     run_orca_input,
 )
 from cochem_bench.orca_writer import (
+    _resolve_relativistic_basis,
     generate_canonical_ccsd_t,
+    generate_counterpoise_input,
     generate_dlpno_ccsd_f12,
+    generate_dlpno_ccsd_f12_with_metadata,
+    resolve_relativistic_basis,
 )
 
 
@@ -280,3 +284,99 @@ def test_live_orca6_hbr_heavy_element_dkh2_and_zora(tmp_path: Path) -> None:
     assert res_zora.final_single_point_energy_eh < -2600.0
     assert res_zora.t1_diagnostic is not None and 0.0 < res_zora.t1_diagnostic < 0.02
     assert res_zora.audit["passed"] is True
+    assert res_zora.provenance["input"]["effective_basis"] == "ZORA-def2-SVP"
+    assert res_zora.provenance["input"]["basis_swapped"] is True
+
+
+def test_relativistic_basis_rejects_unrecognized_bases_and_mismatches() -> None:
+    """M3 regression: unrecognized bases like 6-31G* must fail closed under DKH2/ZORA instead of inventing 6-31G*-DK."""
+    hbr = [("Br", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 1.414)]
+    auh = [("Au", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 1.524)]
+
+    for bad_basis in ("6-31G*", "6-311++G(d,p)", "STO-3G", "LANL2DZ", "6-31G*-DK"):
+        for rel_mode in ("DKH2", "ZORA", "auto"):
+            with pytest.raises(ValueError, match="Unsupported basis"):
+                generate_dlpno_ccsd_f12(hbr, basis=bad_basis, rel_mode=rel_mode)
+            with pytest.raises(ValueError, match="Unsupported basis"):
+                generate_dlpno_ccsd_f12(auh, basis=bad_basis, rel_mode=rel_mode)
+        with pytest.raises(ValueError, match="Unsupported basis"):
+            _resolve_relativistic_basis(bad_basis, "DKH2", [35, 1])
+        with pytest.raises(ValueError, match="Unsupported basis"):
+            _resolve_relativistic_basis(bad_basis, "ZORA", [35, 1])
+
+    # Cross-Hamiltonian mismatches must also fail closed
+    with pytest.raises(ValueError, match="incompatible with DKH2"):
+        resolve_relativistic_basis("ZORA-def2-TZVP", "DKH2", [35, 1])
+    with pytest.raises(ValueError, match="incompatible with ZORA"):
+        resolve_relativistic_basis("DKH-def2-TZVP", "ZORA", [35, 1])
+    with pytest.raises(ValueError, match="incompatible with ZORA"):
+        resolve_relativistic_basis("cc-pVTZ-DK", "ZORA", [35, 1])
+
+
+def test_relativistic_basis_swap_emits_warning_provenance_comment_and_metadata() -> None:
+    """M3 regression: legitimate DKH2/ZORA swaps emit UserWarning, .inp provenance comment, and structured metadata."""
+    hbr = [("Br", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 1.414)]
+    auh = [("Au", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 1.524)]
+
+    cases = [
+        (hbr, "def2-TZVP", "DKH2", "DKH-def2-TZVP"),
+        (hbr, "ma-def2-TZVP", "DKH2", "ma-DKH-def2-TZVP"),
+        (hbr, "cc-pVTZ", "DKH2", "cc-pVTZ-DK"),
+        (hbr, "aug-cc-pVTZ", "DKH2", "aug-cc-pVTZ-DK"),
+        (hbr, "cc-pwCVTZ", "DKH2", "cc-pwCVTZ-DK"),
+        (hbr, "cc-pVTZ", "ZORA", "ZORA-def2-TZVP"),
+        (hbr, "def2-TZVP", "ZORA", "ZORA-def2-TZVP"),
+        (auh, "def2-TZVP", "DKH2", "x2c-TZVPall"),
+        (auh, "cc-pVTZ", "ZORA", "x2c-TZVPall"),
+    ]
+    for coords, req_basis, rel_mode, expected_eff in cases:
+        with pytest.warns(UserWarning, match=expected_eff):
+            deck, meta = generate_dlpno_ccsd_f12_with_metadata(
+                coords, basis=req_basis, rel_mode=rel_mode
+            )
+        tokens = _header_tokens(deck)
+        assert expected_eff in tokens
+        assert meta["requested_basis"] == req_basis
+        assert meta["effective_basis"] == expected_eff
+        assert meta["basis_swapped"] is True
+        assert len(meta["warnings"]) == 1
+        assert meta["provenance_comment"] is not None
+        assert meta["provenance_comment"].startswith("# CoChem-BENCH basis provenance:")
+        assert req_basis in meta["provenance_comment"]
+        assert expected_eff in meta["provenance_comment"]
+        assert meta["provenance_comment"] in deck.splitlines()
+
+    # Already-relativistic bases must NOT swap or emit warnings
+    import warnings as _warnings
+
+    for rel_basis, rel_mode in [
+        ("DKH-def2-TZVP", "DKH2"),
+        ("cc-pVTZ-DK", "DKH2"),
+        ("SARC-DKH-TZVP", "DKH2"),
+        ("x2c-TZVPall", "DKH2"),
+        ("ZORA-def2-TZVP", "ZORA"),
+        ("SARC-ZORA-TZVP", "ZORA"),
+        ("x2c-TZVPall", "ZORA"),
+    ]:
+        with _warnings.catch_warnings(record=True) as caught:
+            _warnings.simplefilter("always")
+            deck, meta = generate_dlpno_ccsd_f12_with_metadata(
+                hbr, basis=rel_basis, rel_mode=rel_mode
+            )
+        assert caught == []
+        assert meta["basis_swapped"] is False
+        assert meta["effective_basis"] == rel_basis
+        assert meta["warnings"] == []
+        assert meta["provenance_comment"] is None
+        assert "# CoChem-BENCH basis provenance:" not in deck
+
+    # Counterpoise wrapper also exposes structured basis provenance metadata
+    with pytest.warns(UserWarning, match="DKH-def2-SVP"):
+        cp_res = generate_counterpoise_input(
+            [("Br", 0.0, 0.0, 0.0)],
+            [("H", 0.0, 0.0, 1.414)],
+            basis="def2-SVP",
+            rel_mode="auto",
+        )
+    assert cp_res["basis_provenance"]["effective_basis"] == "DKH-def2-SVP"
+    assert cp_res["basis_provenance"]["basis_swapped"] is True

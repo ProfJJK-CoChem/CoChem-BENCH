@@ -22,7 +22,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .orca_parser import OrcaEnergyResult, parse_orca_energy
-from .orca_writer import generate_dlpno_ccsd_f12
+from .orca_writer import generate_dlpno_ccsd_f12_with_metadata
 from .verifier import audit_diagnostics, export_provenance_json
 
 _ORCA_NORMAL_TERMINATION_MARKER = "****ORCA TERMINATED NORMALLY****"
@@ -372,7 +372,7 @@ def run_orca_calculation(
     timeout_seconds: float = 600.0,
 ) -> OrcaRunResult:
     """Generate a valid ORCA 6.1.1 deck and execute it live through ``run_orca_input``."""
-    deck = generate_dlpno_ccsd_f12(
+    deck, basis_meta = generate_dlpno_ccsd_f12_with_metadata(
         coords=coords,
         basis=basis,
         is_opt=is_opt,
@@ -397,6 +397,9 @@ def run_orca_calculation(
         input_metadata={
             "method": method,
             "basis": basis,
+            "effective_basis": basis_meta["effective_basis"],
+            "basis_swapped": basis_meta["basis_swapped"],
+            "basis_warnings": basis_meta["warnings"],
             "is_opt": is_opt,
             "rel_mode": rel_mode,
             "charge": charge,

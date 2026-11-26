@@ -6,6 +6,8 @@ Boys-Bernardi counterpoise, and scalar-relativistic (DKH2/ZORA) inputs.
 
 from __future__ import annotations
 
+import re
+import warnings
 from typing import Any
 
 from .basis_manager import (
@@ -52,13 +54,40 @@ _DEF2_AUX_C_BASES: frozenset[str] = frozenset({
     "def2-QZVPP",
 })
 
-_DEF2_TO_X2C_ALL: dict[str, str] = {
-    "def2-SVP": "x2c-SVPall",
-    "def2-TZVP": "x2c-TZVPall",
-    "def2-TZVPP": "x2c-TZVPPall",
-    "def2-QZVP": "x2c-QZVPall",
-    "def2-QZVPP": "x2c-QZVPPall",
+# Canonical Karlsruhe def2-* bases with genuine ORCA 6 DKH-def2-* / ZORA-def2-* (Z <= 36)
+# and all-electron x2c-*all (Z > 36) scalar-relativistic counterparts.
+_DEF2_CANONICAL_MAP: dict[str, tuple[str, str]] = {
+    "def2-sv(p)": ("def2-SV(P)", "x2c-SVPall"),
+    "def2-svp": ("def2-SVP", "x2c-SVPall"),
+    "def2-tzvp": ("def2-TZVP", "x2c-TZVPall"),
+    "def2-tzvp(-f)": ("def2-TZVP(-f)", "x2c-TZVPall"),
+    "def2-tzvpp": ("def2-TZVPP", "x2c-TZVPPall"),
+    "def2-qzvp": ("def2-QZVP", "x2c-QZVPall"),
+    "def2-qzvpp": ("def2-QZVPP", "x2c-QZVPPall"),
 }
+
+_MA_DEF2_CANONICAL_MAP: dict[str, tuple[str, str]] = {
+    f"ma-{k}": (f"ma-{canon}", x2c)
+    for k, (canon, x2c) in _DEF2_CANONICAL_MAP.items()
+}
+
+_DEF2_TO_X2C_ALL: dict[str, str] = {
+    canon: x2c for canon, x2c in _DEF2_CANONICAL_MAP.values()
+}
+
+# Correlation-consistent bases with genuine ORCA 6 DKH2 (-DK / -DK3) counterparts.
+_CC_BASIS_RE = re.compile(
+    r"^(?P<aug>aug-)?cc-p(?P<cv>w?C)?V(?P<zeta>[DTQ56])Z(?P<suffix>-F12|-DK|-DK3)?$"
+)
+
+_DKH_PREFIXES: tuple[str, ...] = ("DKH-", "old-DKH-", "ma-DKH-", "SARC-DKH-")
+_ZORA_PREFIXES: tuple[str, ...] = ("ZORA-", "old-ZORA-", "ma-ZORA-", "SARC-ZORA-")
+_X2C_PREFIXES: tuple[str, ...] = ("x2c-",)
+
+_SUPPORTED_REL_BASIS_FAMILIES_MSG = (
+    "def2-*, ma-def2-*, cc-pVXZ, aug-cc-pVXZ, cc-pwCVXZ, aug-cc-pwCVXZ, "
+    "DKH-*, ZORA-*, SARC-*, or x2c-*"
+)
 
 
 def inspect_basis_set_cp_capability(basis: str) -> dict[str, Any]:
@@ -85,68 +114,168 @@ def _extract_elements(
     return symbols, atomic_numbers
 
 
+def resolve_relativistic_basis(
+    basis: str,
+    rel_hamiltonian: str,
+    atomic_numbers: list[int],
+    *,
+    emit_warning: bool = True,
+) -> dict[str, Any]:
+    """Resolve an ORCA 6.1.1 scalar-relativistic orbital basis with strict validation and provenance.
+
+    Only bases with genuine ORCA 6 relativistic counterparts (def2-*, ma-def2-*,
+    cc-pVXZ, aug-cc-pVXZ, cc-pwCVXZ, DKH-*, ZORA-*, SARC-*, x2c-*) are mapped.
+    Unrecognized bases (e.g. Pople 6-31G*) under DKH2 or ZORA fail closed with ValueError.
+    Whenever a basis swap occurs, an explicit UserWarning is emitted (when emit_warning=True)
+    and structured provenance metadata plus an ORCA comment line are returned.
+    """
+    if not isinstance(basis, str) or not basis.strip():
+        raise ValueError(f"Basis set must be a non-empty string, got {basis!r}.")
+    if not atomic_numbers:
+        raise ValueError("atomic_numbers must contain at least one atomic number.")
+
+    basis_clean = basis.strip()
+    rel_upper = rel_hamiltonian.strip().upper()
+    max_z = max(atomic_numbers)
+    extra_lines: list[str] = []
+
+    def _build_result(effective: str) -> dict[str, Any]:
+        swapped = effective != basis_clean
+        warning_list: list[str] = []
+        provenance_comment: str | None = None
+        if swapped:
+            msg = (
+                f"CoChem-BENCH basis swap ({rel_upper}, max_Z={max_z}): "
+                f"requested basis {basis_clean!r} mapped to ORCA 6 basis {effective!r}."
+            )
+            warning_list.append(msg)
+            provenance_comment = (
+                f"# CoChem-BENCH basis provenance: requested '{basis_clean}' -> "
+                f"effective '{effective}' ({rel_upper}, max_Z={max_z})"
+            )
+            if emit_warning:
+                warnings.warn(msg, UserWarning, stacklevel=3)
+        return {
+            "requested_basis": basis_clean,
+            "effective_basis": effective,
+            "relativistic_hamiltonian": rel_upper,
+            "max_z": max_z,
+            "basis_swapped": swapped,
+            "extra_basis_block_lines": extra_lines,
+            "warnings": warning_list,
+            "provenance_comment": provenance_comment,
+        }
+
+    if rel_upper == "NONE":
+        return _build_result(basis_clean)
+
+    basis_lower = basis_clean.lower()
+    cc_match = _CC_BASIS_RE.fullmatch(basis_clean)
+
+    if rel_upper == "DKH2":
+        if basis_clean.startswith(_ZORA_PREFIXES):
+            raise ValueError(
+                f"ZORA basis {basis_clean!r} is incompatible with DKH2 Hamiltonian. "
+                f"Use a DKH2-compatible basis ({_SUPPORTED_REL_BASIS_FAMILIES_MSG})."
+            )
+
+        # Preserve already-relativistic ORCA 6 DKH / SARC-DKH / x2c keywords
+        if basis_clean.startswith(_DKH_PREFIXES) or basis_clean.startswith(_X2C_PREFIXES):
+            return _build_result(basis_clean)
+
+        # Karlsruhe def2-* family -> DKH-def2-* (Z <= 36) or all-electron x2c-*all (Z > 36)
+        if basis_lower in _DEF2_CANONICAL_MAP:
+            canon_def2, x2c_basis = _DEF2_CANONICAL_MAP[basis_lower]
+            effective = f"DKH-{canon_def2}" if max_z <= 36 else x2c_basis
+            return _build_result(effective)
+
+        # Minimally augmented ma-def2-* family -> ma-DKH-def2-* (Z <= 36) or x2c-*all (Z > 36)
+        if basis_lower in _MA_DEF2_CANONICAL_MAP:
+            canon_ma, x2c_basis = _MA_DEF2_CANONICAL_MAP[basis_lower]
+            effective = canon_ma.replace("ma-def2-", "ma-DKH-def2-", 1) if max_z <= 36 else x2c_basis
+            return _build_result(effective)
+
+        # Correlation-consistent bases (cc-pVXZ, aug-cc-pVXZ, cc-pwCVXZ, cc-pCVXZ, optional -F12/-DK/-DK3)
+        if cc_match is not None:
+            suffix = cc_match.group("suffix")
+            if suffix in ("-DK", "-DK3"):
+                return _build_result(basis_clean)
+            base_cc = basis_clean[:-4] if suffix == "-F12" else basis_clean
+            return _build_result(f"{base_cc}-DK")
+
+        raise ValueError(
+            f"Unsupported basis {basis_clean!r} for scalar-relativistic DKH2 calculation "
+            f"(max_Z={max_z}): ORCA 6 has no valid DKH2 counterpart for this basis. "
+            f"Use one of: {_SUPPORTED_REL_BASIS_FAMILIES_MSG}."
+        )
+
+    if rel_upper == "ZORA":
+        is_valid_cc_dk = cc_match is not None and cc_match.group("suffix") in ("-DK", "-DK3")
+        if basis_clean.startswith(_DKH_PREFIXES) or is_valid_cc_dk:
+            raise ValueError(
+                f"DKH basis {basis_clean!r} is incompatible with ZORA Hamiltonian. "
+                f"Use a ZORA-compatible basis ({_SUPPORTED_REL_BASIS_FAMILIES_MSG})."
+            )
+
+        if basis_clean.startswith(_ZORA_PREFIXES) or basis_clean.startswith(_X2C_PREFIXES):
+            return _build_result(basis_clean)
+
+        if basis_lower in _DEF2_CANONICAL_MAP:
+            canon_def2, x2c_basis = _DEF2_CANONICAL_MAP[basis_lower]
+            effective = f"ZORA-{canon_def2}" if max_z <= 36 else x2c_basis
+            return _build_result(effective)
+
+        if basis_lower in _MA_DEF2_CANONICAL_MAP:
+            canon_ma, x2c_basis = _MA_DEF2_CANONICAL_MAP[basis_lower]
+            effective = canon_ma.replace("ma-def2-", "ma-ZORA-def2-", 1) if max_z <= 36 else x2c_basis
+            return _build_result(effective)
+
+        # ORCA 6 does not define cc-pVXZ-ZORA; map recognized cc-* bases to matching ZORA-def2 / x2c tier.
+        if cc_match is not None:
+            zeta = cc_match.group("zeta")
+            if max_z <= 36:
+                if zeta == "D":
+                    return _build_result("ZORA-def2-SVP")
+                if zeta in ("Q", "5", "6"):
+                    return _build_result("ZORA-def2-QZVPP")
+                return _build_result("ZORA-def2-TZVP")
+            if zeta == "D":
+                return _build_result("x2c-SVPall")
+            if zeta in ("Q", "5", "6"):
+                return _build_result("x2c-QZVPall")
+            return _build_result("x2c-TZVPall")
+
+        raise ValueError(
+            f"Unsupported basis {basis_clean!r} for scalar-relativistic ZORA calculation "
+            f"(max_Z={max_z}): ORCA 6 has no valid ZORA counterpart for this basis. "
+            f"Use one of: {_SUPPORTED_REL_BASIS_FAMILIES_MSG}."
+        )
+
+    raise ValueError(f"Unsupported relativistic mode: {rel_hamiltonian!r}. Expected 'auto', 'none', 'DKH2', or 'ZORA'.")
+
+
 def _resolve_relativistic_basis(
     basis: str,
     rel_hamiltonian: str,
     atomic_numbers: list[int],
-) -> tuple[str, list[str]]:
-    """Resolve an ORCA 6.1.1 valid orbital basis and optional per-atom %basis directives.
+    *,
+    emit_warning: bool = True,
+) -> tuple[str, list[str], list[str]]:
+    """Resolve an ORCA 6.1.1 valid orbital basis, %basis lines, and basis-swap warnings.
 
-    Returns (effective_basis, extra_basis_block_lines).
+    Returns (effective_basis, extra_basis_block_lines, warnings).
     """
-    rel_upper = rel_hamiltonian.upper()
-    if rel_upper == "NONE":
-        return basis, []
-
-    max_z = max(atomic_numbers)
-    extra_lines: list[str] = []
-
-    if rel_upper == "DKH2":
-        # Preserve already-relativistic ORCA 6 keywords
-        if (
-            basis.startswith(("DKH-", "x2c-", "old-DKH-", "SARC-DKH-"))
-            or basis.endswith(("-DK", "-DK3"))
-        ):
-            return basis, extra_lines
-
-        # Karlsruhe def2-* family -> DKH-def2-* (Z <= 36) or all-electron x2c-*all (Z > 36)
-        if basis in _DEF2_TO_X2C_ALL:
-            if max_z <= 36:
-                return f"DKH-{basis}", extra_lines
-            return _DEF2_TO_X2C_ALL[basis], extra_lines
-
-        # Correlation-consistent bases (including -F12 mapped to relativistic -DK)
-        cleaned = basis[:-4] if basis.endswith("-F12") else basis
-        if "aug-cc-p" in cleaned or "cc-p" in cleaned:
-            if not cleaned.endswith("-DK"):
-                return f"{cleaned}-DK", extra_lines
-            return cleaned, extra_lines
-
-        if max_z <= 36:
-            return f"{basis}-DK", extra_lines
-        return "x2c-TZVPall", extra_lines
-
-    if rel_upper == "ZORA":
-        if basis.startswith(("ZORA-", "x2c-", "old-ZORA-", "SARC-ZORA-")):
-            return basis, extra_lines
-        if basis in _DEF2_TO_X2C_ALL:
-            if max_z <= 36:
-                return f"ZORA-{basis}", extra_lines
-            return _DEF2_TO_X2C_ALL[basis], extra_lines
-        # ORCA 6 does not define cc-pVXZ-ZORA; select matching scalar-relativistic basis.
-        if max_z <= 36:
-            if "VDZ" in basis.upper() or "SVP" in basis.upper():
-                return "ZORA-def2-SVP", extra_lines
-            if "VQZ" in basis.upper() or "QZVP" in basis.upper():
-                return "ZORA-def2-QZVPP", extra_lines
-            return "ZORA-def2-TZVP", extra_lines
-        if "VDZ" in basis.upper() or "SVP" in basis.upper():
-            return "x2c-SVPall", extra_lines
-        if "VQZ" in basis.upper() or "QZVP" in basis.upper():
-            return "x2c-QZVPall", extra_lines
-        return "x2c-TZVPall", extra_lines
-
-    raise ValueError(f"Unsupported relativistic mode: {rel_hamiltonian!r}. Expected 'auto', 'none', 'DKH2', or 'ZORA'.")
+    meta = resolve_relativistic_basis(
+        basis=basis,
+        rel_hamiltonian=rel_hamiltonian,
+        atomic_numbers=atomic_numbers,
+        emit_warning=emit_warning,
+    )
+    return (
+        meta["effective_basis"],
+        meta["extra_basis_block_lines"],
+        meta["warnings"],
+    )
 
 
 def _resolve_f12_aux_and_cabs(
@@ -170,10 +299,10 @@ def _resolve_f12_aux_and_cabs(
     # Pair ZORA-def2-* / def2-* with its native /C basis alongside AutoAux to avoid
     # Cholesky near-linear-dependency issues in ZORA AutoAux RI-C construction.
     stripped_def2 = effective_basis
-    for prefix in ("DKH-", "ZORA-"):
+    for prefix in ("ma-DKH-", "ma-ZORA-", "DKH-", "ZORA-", "ma-"):
         if stripped_def2.startswith(prefix):
             stripped_def2 = stripped_def2[len(prefix):]
-    if stripped_def2 in _DEF2_AUX_C_BASES and not effective_basis.startswith("DKH-"):
+    if stripped_def2 in _DEF2_AUX_C_BASES and "DKH-" not in effective_basis:
         header_aux.append(f"{stripped_def2}/C")
     header_aux.append("AutoAux")
     return header_aux, ['  CABS "AutoAux"']
@@ -187,7 +316,7 @@ def _method_requires_numgrad(method: str) -> bool:
     return ("DLPNO-CCSD" in upper) or ("CCSD(T)" in upper)
 
 
-def generate_dlpno_ccsd_f12(
+def generate_dlpno_ccsd_f12_with_metadata(
     coords: list[tuple[str, float, float, float] | list[Any]],
     basis: str = "aug-cc-pVTZ",
     is_opt: bool = False,
@@ -200,13 +329,8 @@ def generate_dlpno_ccsd_f12(
     method: str = "DLPNO-CCSD(T)-F12",
     pno_setting: str = "TightPNO",
     maxcore: int | None = None,
-) -> str:
-    """
-    Generates ORCA 6.1.1 live-validated DLPNO-CCSD(T)-F12 / DLPNO-CCSD(T1) / canonical CCSD(T)
-    input decks with complete periodic-table scalar-relativistic handling (Z = 1..118),
-    explicit 3d transition-metal (Z = 21..30) relativistic/grid handling, proper F12 CABS
-    basis pairing, TightPNO for benchmark DLPNO methods, and NumGrad for numerical optimizations.
-    """
+) -> tuple[str, dict[str, Any]]:
+    """Generate an ORCA 6.1.1 input deck together with structured basis-resolution metadata."""
     symbols, atomic_numbers = _extract_elements(coords)
     has_heavy = any(is_heavy_element(sym) for sym in symbols)
     has_3d_tm = any(is_3d_transition_metal(sym) for sym in symbols)
@@ -222,7 +346,9 @@ def generate_dlpno_ccsd_f12(
     else:
         raise ValueError(f"Unsupported rel_mode {rel_mode!r}; expected 'auto', 'none', 'DKH2', or 'ZORA'.")
 
-    effective_basis, basis_block_lines = _resolve_relativistic_basis(basis, effective_rel, atomic_numbers)
+    basis_meta = resolve_relativistic_basis(basis, effective_rel, atomic_numbers, emit_warning=True)
+    effective_basis = basis_meta["effective_basis"]
+    basis_block_lines = list(basis_meta["extra_basis_block_lines"])
 
     method_clean = method.strip()
     method_upper = method_clean.upper()
@@ -261,6 +387,8 @@ def generate_dlpno_ccsd_f12(
             keywords.append("NumGrad")
 
     lines: list[str] = [" ".join(keywords)]
+    if basis_meta["provenance_comment"] is not None:
+        lines.append(basis_meta["provenance_comment"])
 
     if nprocs > 1:
         lines.append(f"%pal nprocs {nprocs} end")
@@ -290,7 +418,53 @@ def generate_dlpno_ccsd_f12(
         lines.append(f"  {c[0]}  {float(c[1]):12.8f}  {float(c[2]):12.8f}  {float(c[3]):12.8f}")
     lines.append("*")
 
-    return "\n".join(lines) + "\n"
+    metadata = {
+        "requested_basis": basis_meta["requested_basis"],
+        "effective_basis": effective_basis,
+        "relativistic_hamiltonian": basis_meta["relativistic_hamiltonian"],
+        "max_z": basis_meta["max_z"],
+        "basis_swapped": basis_meta["basis_swapped"],
+        "warnings": list(basis_meta["warnings"]),
+        "provenance_comment": basis_meta["provenance_comment"],
+    }
+    return "\n".join(lines) + "\n", metadata
+
+
+def generate_dlpno_ccsd_f12(
+    coords: list[tuple[str, float, float, float] | list[Any]],
+    basis: str = "aug-cc-pVTZ",
+    is_opt: bool = False,
+    in_hess: str = "XTB2",
+    rel_mode: str = "auto",
+    tight_scf: bool = False,
+    charge: int = 0,
+    mult: int = 1,
+    nprocs: int = 1,
+    method: str = "DLPNO-CCSD(T)-F12",
+    pno_setting: str = "TightPNO",
+    maxcore: int | None = None,
+) -> str:
+    """
+    Generates ORCA 6.1.1 live-validated DLPNO-CCSD(T)-F12 / DLPNO-CCSD(T1) / canonical CCSD(T)
+    input decks with complete periodic-table scalar-relativistic handling (Z = 1..118),
+    explicit 3d transition-metal (Z = 21..30) relativistic/grid handling, proper F12 CABS
+    basis pairing, TightPNO for benchmark DLPNO methods, and NumGrad for numerical optimizations.
+    """
+    deck, _ = generate_dlpno_ccsd_f12_with_metadata(
+        coords=coords,
+        basis=basis,
+        is_opt=is_opt,
+        in_hess=in_hess,
+        rel_mode=rel_mode,
+        tight_scf=tight_scf,
+        charge=charge,
+        mult=mult,
+        nprocs=nprocs,
+        method=method,
+        pno_setting=pno_setting,
+        maxcore=maxcore,
+    )
+    return deck
 
 
 def generate_canonical_ccsd_t(
@@ -343,7 +517,7 @@ def generate_counterpoise_input(
 
     # Complex (all real atoms, no ghost colon)
     complex_coords = list(frag_a) + list(frag_b)
-    complex_inp = generate_dlpno_ccsd_f12(
+    complex_inp, basis_meta = generate_dlpno_ccsd_f12_with_metadata(
         complex_coords,
         basis=basis,
         is_opt=is_opt,
@@ -388,6 +562,7 @@ def generate_counterpoise_input(
         "complex_input": complex_inp,
         "monomer_a_input": monomer_a_inp,
         "monomer_b_input": monomer_b_inp,
+        "basis_provenance": basis_meta,
     }
 
     if is_opt:
