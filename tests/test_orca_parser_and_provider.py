@@ -16,10 +16,17 @@ from cochem_bench.orca_parser import parse_orca_energy, parse_orca_output_text
 from cochem_bench.provider import OPERATIONS, bench_provider, dispatch_operation, execute_handoff
 from cochem_bench.verifier import audit_diagnostics
 
-H2O_ORCA_OUT = Path(
-    r"D:\__CoChem\GitHub-Repo\CoChem-GEOM\benchmarks\h2o_t_geom_01\orca_ccsd_cc_pvtz\h2o_ccsd_pvtz.out"
+def _d_drive_path(*parts: str) -> Path:
+    win_path = Path("D:\\", *parts)
+    if win_path.is_file():
+        return win_path
+    return Path("/mnt/d", *parts)
+
+
+H2O_ORCA_OUT = _d_drive_path(
+    "__CoChem", "GitHub-Repo", "CoChem-GEOM", "benchmarks", "h2o_t_geom_01", "orca_ccsd_cc_pvtz", "h2o_ccsd_pvtz.out"
 )
-HCOOH_DME_ORCA_OUT = Path(r"D:\_orca_jobs\hcooh-dme\S1_revdsd_opt.out")
+HCOOH_DME_ORCA_OUT = _d_drive_path("_orca_jobs", "hcooh-dme", "S1_revdsd_opt.out")
 
 
 def test_parse_real_orca_h2o_ccsd_pvtz() -> None:

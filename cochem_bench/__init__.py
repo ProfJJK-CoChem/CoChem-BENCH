@@ -20,6 +20,18 @@ from .extrapolate import (
     compute_total_cbs_energy,
 )
 from .orca_parser import OrcaEnergyResult, parse_orca_energy, parse_orca_output_text
+from .orca_runner import (
+    OrcaExecutionError,
+    OrcaRunResult,
+    resolve_orca_binary,
+    run_orca_calculation,
+    run_orca_input,
+)
+from .orca_writer import (
+    generate_canonical_ccsd_t,
+    generate_counterpoise_input,
+    generate_dlpno_ccsd_f12,
+)
 from .provider import BenchProvider, bench_provider, dispatch_operation, execute_handoff
 from .thermochemistry import (
     CompositeEnergyResult,
@@ -45,6 +57,14 @@ __all__ = [
     "OrcaEnergyResult",
     "parse_orca_energy",
     "parse_orca_output_text",
+    "OrcaExecutionError",
+    "OrcaRunResult",
+    "resolve_orca_binary",
+    "run_orca_input",
+    "run_orca_calculation",
+    "generate_dlpno_ccsd_f12",
+    "generate_canonical_ccsd_t",
+    "generate_counterpoise_input",
     "CompositeEnergyResult",
     "RelativeEnergyEntry",
     "RelativeEnergyTable",
