@@ -1,9 +1,9 @@
 ---
 schema: cochem-srs/5.0
 repo: CoChem-BENCH
-status: ACTIVE_CORE (CBS/F12 and ORCA parser operational; Boltzmann ensemble and fragment escalation pending)
+status: ACTIVE_CORE (CBS/F12 and ORCA parser with (T) triples recovery operational; Boltzmann ensemble and fragment escalation pending)
 pipeline_baseline: 5.0.0
-source_commit: e856bc29cec6ffb50608b1f01bc8be3c57b72601
+source_commit: c3283eb0f23c328ca862177896766b93aa0ef237
 decision_ref: swarm-1126-8efd
 ---
 
@@ -26,7 +26,7 @@ The installable package resides under `cochem_bench/` (22 production `.py` files
 ## 3. Authoritative Scientific Engines, Methods & Method Matrix Constraints
 
 - **CBS & F12 Extrapolation (`cochem_bench/extrapolate.py`, `cochem_bench/constants.py`):** Implements two-point exponential SCF extrapolation and inverse-power Helgaker / Neese-Valeev / F12 correlation extrapolation with exact component accounting.
-- **ORCA 6.x Input Writer, Runner & Parser (`cochem_bench/orca_writer.py`, `cochem_bench/orca_runner.py`, `cochem_bench/orca_parser.py`, `cochem_bench/basis_manager.py`):** Generates Boys-Bernardi BSSE ghost-atom inputs, core-valence (`aug-cc-pCVTZ`) and scalar relativistic (`DKH2`/`X2C`/`ZORA`) directives, enforces `DefGrid3` (disabling `gCP` on CBS tiers), and parses authentic ORCA 6.x logs.
+- **ORCA 6.x Input Writer, Runner & Parser (`cochem_bench/orca_writer.py`, `cochem_bench/orca_runner.py`, `cochem_bench/orca_parser.py`, `cochem_bench/basis_manager.py`):** Generates Boys-Bernardi BSSE ghost-atom inputs, core-valence (`aug-cc-pCVTZ`) and scalar relativistic (`DKH2`/`X2C`/`ZORA`) directives, enforces `DefGrid3` (disabling `gCP` on CBS tiers), and parses authentic ORCA 6.x logs including `(T)` perturbative triples recovery (`Final correlation energy` + `triples_correction_eh`, verified at `-0.007648001 Eh` on ORCA 6.1.1 `CCSD(T)/cc-pVTZ`, commit `c3283eb` / P1-02).
 - **Diagnostics & Thermochemical Integrity (`cochem_bench/verifier.py`, `cochem_bench/thermochemistry.py`):** Implements `verify_multireference_gate`, `audit_diagnostics` (`T1`/`D1` thresholds), and `audit_frozen_core_bias`. Missing composite terms (core-valence, relativistic, ZPE) are emitted honestly as `PENDING` rather than fabricated or silently zeroed.
 - **Method Matrix Constraints:** `cochem_bench/orca_writer.py` (line 384) currently emits `! TightOpt` shorthand and is tracked in Section 6 for migration to an explicit 5-threshold `%geom` block per Method Matrix §4.4.
 
