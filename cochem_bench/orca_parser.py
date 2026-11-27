@@ -16,7 +16,31 @@ _PROGRAM_VERSION_RE = re.compile(r"Program\s+Version\s+([0-9]+\.[0-9]+\.[0-9]+(?
 _FINAL_SPE_RE = re.compile(rf"FINAL\s+SINGLE\s+POINT\s+ENERGY\s+({_FLOAT_RE})", re.IGNORECASE)
 _SCF_TOTAL_ENERGY_RE = re.compile(rf"Total\s+Energy\s*:\s*({_FLOAT_RE})\s+Eh", re.IGNORECASE)
 _E0_RE = re.compile(rf"E\(0\)\s*(?:\.+|:)\s*({_FLOAT_RE})", re.IGNORECASE)
+_FINAL_CORR_F12_RE = re.compile(
+    rf"Final\s+correlation\s+energy\s*\(\s*with\s+F12\s*\)\s*(?:\.+|:)\s*({_FLOAT_RE})",
+    re.IGNORECASE,
+)
+_FINAL_CORR_RE = re.compile(
+    rf"Final\s+correlation\s+energy\s*(?:\.+|:)\s*({_FLOAT_RE})",
+    re.IGNORECASE,
+)
+_FINAL_F12_CORR_RE = re.compile(
+    rf"Final\s+F12\s+correlation\s+energy\s*(?:\.+|:)\s*({_FLOAT_RE})",
+    re.IGNORECASE,
+)
+_ECORR_CORRECTED_RE = re.compile(
+    rf"E\(CORR\)\s*\(\s*corrected\s*\)\s*(?:\.+|:)\s*({_FLOAT_RE})",
+    re.IGNORECASE,
+)
 _ECORR_MDCI_RE = re.compile(rf"E\(CORR\)\s*(?:\.+|:)\s*({_FLOAT_RE})", re.IGNORECASE)
+_TRIPLES_RE = re.compile(
+    rf"Triples\s+Correction\s*\(T\)\s*(?:\.+|:)\s*({_FLOAT_RE})",
+    re.IGNORECASE,
+)
+_SCALED_TRIPLES_RE = re.compile(
+    rf"Scaled\s+triples\s+correction\s*\(T\)\s*(?:\.+|:)\s*({_FLOAT_RE})",
+    re.IGNORECASE,
+)
 _ECORR_MP2_RE = re.compile(
     rf"(?:RI-MP2\s+)?CORRELATION\s+ENERGY\s*:\s*({_FLOAT_RE})\s+Eh",
     re.IGNORECASE,
@@ -39,6 +63,7 @@ class OrcaEnergyResult(BaseModel):
     final_single_point_energy_eh: float | None = None
     scf_energy_eh: float | None = None
     correlation_energy_eh: float | None = None
+    triples_correction_eh: float | None = None
     t1_diagnostic: float | None = None
     d1_diagnostic: float | None = None
     scf_converged: bool = False
@@ -51,32 +76,51 @@ class OrcaEnergyResult(BaseModel):
     provenance_tag: str = "[M]"
 
 
+def _parse_float(raw: str) -> float:
+    return float(raw.replace("D", "E").replace("d", "e"))
+
+
 def parse_orca_output_text(text: str, *, source_path: str | None = None) -> OrcaEnergyResult:
     """Parse an ORCA output string into an ``OrcaEnergyResult``."""
     ver_match = _PROGRAM_VERSION_RE.search(text)
     orca_version = ver_match.group(1) if ver_match else None
 
     spe_matches = _FINAL_SPE_RE.findall(text)
-    final_spe = float(spe_matches[-1].replace("D", "E").replace("d", "e")) if spe_matches else None
+    final_spe = _parse_float(spe_matches[-1]) if spe_matches else None
 
-    # Prefer MDCI E(0) if present (exact Hartree-Fock reference for CC), else SCF Total Energy
+    # Prefer SCF Total Energy if present, else MDCI E(0) reference
     e0_matches = _E0_RE.findall(text)
     scf_matches = _SCF_TOTAL_ENERGY_RE.findall(text)
     if scf_matches:
-        scf_energy = float(scf_matches[-1].replace("D", "E").replace("d", "e"))
+        scf_energy = _parse_float(scf_matches[-1])
     elif e0_matches:
-        scf_energy = float(e0_matches[-1].replace("D", "E").replace("d", "e"))
+        scf_energy = _parse_float(e0_matches[-1])
     else:
         scf_energy = None
 
-    ecorr_mdci = _ECORR_MDCI_RE.findall(text)
-    ecorr_mp2 = _ECORR_MP2_RE.findall(text)
-    if ecorr_mdci:
-        corr_energy = float(ecorr_mdci[-1].replace("D", "E").replace("d", "e"))
-    elif ecorr_mp2:
-        corr_energy = float(ecorr_mp2[-1].replace("D", "E").replace("d", "e"))
-    else:
-        corr_energy = None
+    # Correlation energy priority:
+    # 1. Final correlation energy (with F12)  -> CCSD(T)-F12 / DLPNO-CCSD(T)-F12
+    # 2. Final correlation energy             -> CCSD(T) / DLPNO-CCSD(T) (includes (T) triples)
+    # 3. Final F12 correlation energy         -> CCSD-F12 / DLPNO-CCSD-F12 without triples
+    # 4. E(CORR)(corrected)                   -> DLPNO-CCSD without triples
+    # 5. E(CORR)                              -> canonical CCSD without triples
+    # 6. [RI-MP2] CORRELATION ENERGY          -> MP2 / double-hybrid DFT
+    corr_energy: float | None = None
+    for pattern in (
+        _FINAL_CORR_F12_RE,
+        _FINAL_CORR_RE,
+        _FINAL_F12_CORR_RE,
+        _ECORR_CORRECTED_RE,
+        _ECORR_MDCI_RE,
+        _ECORR_MP2_RE,
+    ):
+        matches = pattern.findall(text)
+        if matches:
+            corr_energy = _parse_float(matches[-1])
+            break
+
+    triples_matches = _SCALED_TRIPLES_RE.findall(text) or _TRIPLES_RE.findall(text)
+    triples_corr = _parse_float(triples_matches[-1]) if triples_matches else None
 
     t1_matches = _T1_RE.findall(text)
     t1_val = float(t1_matches[-1]) if t1_matches else None
@@ -113,6 +157,7 @@ def parse_orca_output_text(text: str, *, source_path: str | None = None) -> Orca
         final_single_point_energy_eh=final_spe,
         scf_energy_eh=scf_energy,
         correlation_energy_eh=corr_energy,
+        triples_correction_eh=triples_corr,
         t1_diagnostic=t1_val,
         d1_diagnostic=d1_val,
         scf_converged=scf_converged,
