@@ -174,3 +174,106 @@ def test_entry_point_and_handoff_and_cli() -> None:
     assert cli_main(["info"]) == 0
     assert cli_main(["parse-orca", str(H2O_ORCA_OUT)]) == 0
     assert cli_main(["audit", str(H2O_ORCA_OUT)]) == 0
+
+
+def test_parse_orca6_ccsdt_includes_triples_and_preserves_ccsd_mp2_compat() -> None:
+    """Verify ORCA 6 CCSD(T), DLPNO-CCSD(T), DLPNO-CCSD(T)-F12 include (T) triples without breaking CCSD/MP2."""
+    ccsdt_h2o_text = """
+                             Program Version 6.1.1  -  RELEASE   -
+    |  1> ! RHF CCSD(T) cc-pVTZ VeryTightSCF
+    SCF CONVERGED AFTER  12 CYCLES
+    Total Energy       :        -76.057133911839 Eh           -2069.61983 eV
+    ----------------------
+    COUPLED CLUSTER ENERGY
+    ----------------------
+    E(0)                                       ...    -76.057133912
+    E(CORR)                                    ...     -0.267422659
+    E(TOT)                                     ...    -76.324556571
+    Singles Norm <S|S>**1/2                    ...      0.018451876
+    T1 diagnostic                              ...      0.006523723
+    ----------------------
+    RHF TRIPLES CORRECTION (Algorithm 1)
+    ----------------------
+    Triples Correction (T)                     ...     -0.007713000
+    Final correlation energy                   ...     -0.275135659
+    E(CCSD)                                    ...    -76.324556571
+    E(CCSD(T))                                 ...    -76.332269571
+    FINAL SINGLE POINT ENERGY       -76.332269571000
+    ****ORCA TERMINATED NORMALLY****
+    """
+    res_t = parse_orca_output_text(ccsdt_h2o_text)
+    assert res_t.orca_version == "6.1.1"
+    np.testing.assert_allclose(res_t.scf_energy_eh, -76.057133911839, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_t.correlation_energy_eh, -0.275135659, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_t.triples_correction_eh, -0.007713000, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_t.final_single_point_energy_eh, -76.332269571000, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(
+        res_t.scf_energy_eh + res_t.correlation_energy_eh,
+        res_t.final_single_point_energy_eh,
+        rtol=0.0,
+        atol=1e-8,
+    )
+
+    dlpno_ccsdt_text = """
+                             Program Version 6.1.1  -  RELEASE   -
+    SCF CONVERGED AFTER  14 CYCLES
+    Total Energy       :       -372.599869756000 Eh
+    E(0)                                       ...   -372.599869756
+    E(CORR)(strong-pairs)                      ...     -1.276565974
+    E(CORR)(weak-pairs)                        ...     -0.000950768
+    E(CORR)(corrected)                         ...     -1.277516742
+    E(TOT)                                     ...   -373.877386498
+    T1 diagnostic                              ...      0.017500288
+    Triples Correction (T)                     ...     -0.063893738
+    Final correlation energy                   ...     -1.341410480
+    E(CCSD)                                    ...   -373.877386498
+    E(CCSD(T))                                 ...   -373.941280235
+    FINAL SINGLE POINT ENERGY      -373.941280235000
+    ****ORCA TERMINATED NORMALLY****
+    """
+    res_dlpno = parse_orca_output_text(dlpno_ccsdt_text)
+    np.testing.assert_allclose(res_dlpno.correlation_energy_eh, -1.341410480, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_dlpno.triples_correction_eh, -0.063893738, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_dlpno.final_single_point_energy_eh, -373.941280235, rtol=0.0, atol=1e-12)
+
+    dlpno_f12_text = """
+                             Program Version 6.1.1  -  RELEASE   -
+    SCF CONVERGED AFTER  11 CYCLES
+    Total Energy       :       -537.407159100000 Eh
+    E(CORR)(corrected)                         ...     -0.504039144
+    Final F12 correlation energy               ...     -0.535679231
+    Triples Correction (T)                     ...     -0.016785682
+    Final correlation energy (without F12)     ...     -0.520824826
+    Final correlation energy (with F12)        ...     -0.552464914
+    FINAL SINGLE POINT ENERGY      -538.489970743875
+    ****ORCA TERMINATED NORMALLY****
+    """
+    res_f12 = parse_orca_output_text(dlpno_f12_text)
+    np.testing.assert_allclose(res_f12.correlation_energy_eh, -0.552464914, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_f12.triples_correction_eh, -0.016785682, rtol=0.0, atol=1e-12)
+
+    pure_ccsd_text = """
+                             Program Version 6.1.1  -  RELEASE   -
+    SCF CONVERGED AFTER  12 CYCLES
+    Total Energy       :        -76.057133911839 Eh
+    E(0)                                       ...    -76.057133912
+    E(CORR)                                    ...     -0.267422659
+    E(TOT)                                     ...    -76.324556571
+    FINAL SINGLE POINT ENERGY       -76.324556570992
+    ****ORCA TERMINATED NORMALLY****
+    """
+    res_ccsd = parse_orca_output_text(pure_ccsd_text)
+    np.testing.assert_allclose(res_ccsd.correlation_energy_eh, -0.267422659, rtol=0.0, atol=1e-12)
+    assert res_ccsd.triples_correction_eh is None
+
+    pure_mp2_text = """
+                             Program Version 6.1.1  -  RELEASE   -
+    SCF CONVERGED AFTER  10 CYCLES
+    Total Energy       :        -76.057133911839 Eh
+    RI-MP2 CORRELATION ENERGY:       -0.260123456 Eh
+    FINAL SINGLE POINT ENERGY       -76.317257367839
+    ****ORCA TERMINATED NORMALLY****
+    """
+    res_mp2 = parse_orca_output_text(pure_mp2_text)
+    np.testing.assert_allclose(res_mp2.correlation_energy_eh, -0.260123456, rtol=0.0, atol=1e-12)
+    assert res_mp2.triples_correction_eh is None
