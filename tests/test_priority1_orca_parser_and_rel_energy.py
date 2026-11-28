@@ -60,18 +60,33 @@ def test_parse_real_s1_revdsd_scf_does_not_double_count() -> None:
 
 
 def test_rel_energy_accepts_final_single_point_energy_and_gives_clear_error(tmp_path: Path) -> None:
-    """FRIC-10: rel-energy accepts parse-orca final_single_point_energy_eh and raises ValueError (not KeyError) if missing."""
+    """FRIC-10: rel-energy accepts uniform final_single_point_energy_eh and rejects mixed keys or levels of theory."""
     table = compute_relative_energies(
         [
-            {"name": "conf_A", "final_single_point_energy_eh": -176.71734061},
-            {"name": "conf_B", "final_single_point_energy_eh": -176.71500000},
+            {
+                "name": "conf_A",
+                "final_single_point_energy_eh": -176.71734061,
+                "method": "revDSD-PBEP86-D4/2021",
+                "basis": "def2-TZVPP",
+            },
+            {
+                "name": "conf_B",
+                "final_single_point_energy_eh": -176.71500000,
+                "method": "revDSD-PBEP86-D4/2021",
+                "basis": "def2-TZVPP",
+            },
         ]
     )
     assert table.reference_species == "conf_A"
+    assert table.base_energy_key == "final_single_point_energy_eh"
+    assert table.protocol_signature == {"method": "revDSD-PBEP86-D4/2021", "basis": "def2-TZVPP"}
     assert table.entries[1].delta_e_kcal_mol > 1.4
 
     with pytest.raises(ValueError, match="missing a finite base energy"):
         compute_relative_energies([{"name": "empty_entry"}])
+
+    with pytest.raises(ValueError, match="non-finite base energy"):
+        compute_relative_energies([{"name": "nan_entry", "final_single_point_energy_eh": float("nan")}])
 
     # Mixing incompatible base energy keys (e.g. e_cbs_eh vs final_single_point_energy_eh) MUST fail closed
     with pytest.raises(ValueError, match="Inconsistent base energy keys"):
@@ -79,6 +94,15 @@ def test_rel_energy_accepts_final_single_point_energy_and_gives_clear_error(tmp_
             [
                 {"name": "A", "final_single_point_energy_eh": -10.0},
                 {"name": "B", "e_cbs_eh": -9.99},
+            ]
+        )
+
+    # Mixing incompatible method/basis protocols with the same key MUST fail closed
+    with pytest.raises(ValueError, match="Inconsistent level of theory"):
+        compute_relative_energies(
+            [
+                {"name": "A", "final_single_point_energy_eh": -10.0, "method": "B3LYP", "basis": "def2-SVP"},
+                {"name": "B", "final_single_point_energy_eh": -9.99, "method": "CCSD", "basis": "cc-pVTZ"},
             ]
         )
 

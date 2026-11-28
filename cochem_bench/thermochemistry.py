@@ -13,6 +13,7 @@ recorded as ``PENDING`` in ``correction_status`` and ``pending_corrections``.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -27,6 +28,7 @@ class CompositeEnergyResult(BaseModel):
 
     name: str
     e_cbs_eh: float
+    base_energy_key: str = "e_cbs_eh"
     delta_cv_eh: float | None = None
     delta_rel_eh: float | None = None
     rel_method: str | None = None
@@ -63,6 +65,8 @@ class RelativeEnergyTable(BaseModel):
     reference_species: str | None
     reference_energy_eh: float | None
     energy_field: str
+    base_energy_key: str | None = None
+    protocol_signature: dict[str, str] = Field(default_factory=dict)
     entries: list[RelativeEnergyEntry]
     codata_constants: dict[str, float] = Field(
         default_factory=lambda: {
@@ -77,6 +81,7 @@ def compute_composite_energy(
     *,
     name: str,
     e_cbs_eh: float,
+    base_energy_key: str = "e_cbs_eh",
     delta_cv_eh: float | None = None,
     e_ae_cv_eh: float | None = None,
     e_fc_cv_eh: float | None = None,
@@ -125,6 +130,7 @@ def compute_composite_energy(
         return CompositeEnergyResult(
             name=name,
             e_cbs_eh=float(e_cbs_eh),
+            base_energy_key=base_energy_key,
             delta_cv_eh=terms["delta_cv"],
             delta_rel_eh=terms["delta_rel"],
             rel_method=rel_method,
@@ -162,6 +168,7 @@ def compute_composite_energy(
     return CompositeEnergyResult(
         name=name,
         e_cbs_eh=float(e_cbs_eh),
+        base_energy_key=base_energy_key,
         delta_cv_eh=terms["delta_cv"],
         delta_rel_eh=terms["delta_rel"],
         rel_method=rel_method,
@@ -195,14 +202,17 @@ def compute_relative_energies(
 
     evaluated: list[CompositeEnergyResult] = []
     uniform_energy_key: str | None = None
+    protocol_signatures: list[tuple[str, dict[str, str]]] = []
+    _PROTOCOL_KEYS = ("method", "basis", "level_of_theory", "functional")
     for item in species:
         if isinstance(item, CompositeEnergyResult):
-            if uniform_energy_key is not None and uniform_energy_key != "e_cbs_eh":
+            item_key = item.base_energy_key
+            if uniform_energy_key is not None and uniform_energy_key != item_key:
                 raise ValueError(
-                    f"Inconsistent base energy keys across species ({uniform_energy_key!r} vs 'e_cbs_eh'); "
+                    f"Inconsistent base energy keys across species ({uniform_energy_key!r} vs {item_key!r}); "
                     "relative energies require a uniform energy definition across all species."
                 )
-            uniform_energy_key = "e_cbs_eh"
+            uniform_energy_key = item_key
             evaluated.append(item)
         else:
             item_req = item.get("required_corrections", required_corrections)
@@ -223,6 +233,9 @@ def compute_relative_energies(
                     "(expected 'e_cbs_eh' or 'final_single_point_energy_eh')."
                 )
             matched_key, raw_energy = matched
+            energy_float = float(raw_energy)
+            if not math.isfinite(energy_float):
+                raise ValueError(f"Species {name_val!r} has non-finite base energy ({raw_energy!r}).")
             if uniform_energy_key is None:
                 uniform_energy_key = matched_key
             elif matched_key != uniform_energy_key:
@@ -230,10 +243,17 @@ def compute_relative_energies(
                     f"Inconsistent base energy keys across species ({uniform_energy_key!r} vs {matched_key!r}); "
                     "relative energies require a uniform energy definition across all species."
                 )
+            sig = {
+                k: str(item[k]).strip()
+                for k in _PROTOCOL_KEYS
+                if item.get(k) is not None and str(item[k]).strip()
+            }
+            protocol_signatures.append((name_val, sig))
             evaluated.append(
                 compute_composite_energy(
                     name=name_val,
-                    e_cbs_eh=float(raw_energy),
+                    e_cbs_eh=energy_float,
+                    base_energy_key=matched_key,
                     delta_cv_eh=item.get("delta_cv_eh"),
                     e_ae_cv_eh=item.get("e_ae_cv_eh"),
                     e_fc_cv_eh=item.get("e_fc_cv_eh"),
@@ -247,6 +267,17 @@ def compute_relative_energies(
                     required_corrections=item_req,
                 )
             )
+
+    uniform_protocol: dict[str, str] = {}
+    if any(sig for _, sig in protocol_signatures):
+        first_name, first_sig = protocol_signatures[0]
+        for sp_name, sig in protocol_signatures[1:]:
+            if sig != first_sig:
+                raise ValueError(
+                    f"Inconsistent level of theory across species ({first_name!r}: {first_sig} vs "
+                    f"{sp_name!r}: {sig}); relative energies require matching method/basis protocol."
+                )
+        uniform_protocol = dict(first_sig)
 
     def _extract_energy(res: CompositeEnergyResult) -> float | None:
         if res.status != "COMPLETE":
@@ -276,6 +307,8 @@ def compute_relative_energies(
             reference_species=None,
             reference_energy_eh=None,
             energy_field=energy_field,
+            base_energy_key=uniform_energy_key,
+            protocol_signature=uniform_protocol,
             entries=entries,
         )
 
@@ -330,5 +363,7 @@ def compute_relative_energies(
         reference_species=ref_name,
         reference_energy_eh=ref_energy,
         energy_field=energy_field,
+        base_energy_key=uniform_energy_key,
+        protocol_signature=uniform_protocol,
         entries=entries,
     )
