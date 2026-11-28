@@ -199,10 +199,26 @@ def compute_relative_energies(
             evaluated.append(item)
         else:
             item_req = item.get("required_corrections", required_corrections)
+            name_val = str(item.get("name") or item.get("source_path") or "")
+            if not name_val:
+                raise ValueError("Each species entry must include a nonempty 'name' field.")
+            raw_energy = next(
+                (
+                    item[key]
+                    for key in ("e_cbs_eh", "final_single_point_energy_eh", "e_total_eh", "energy_eh")
+                    if key in item and item[key] is not None
+                ),
+                None,
+            )
+            if raw_energy is None:
+                raise ValueError(
+                    f"Species {name_val!r} is missing a finite base energy "
+                    "(expected 'e_cbs_eh' or 'final_single_point_energy_eh')."
+                )
             evaluated.append(
                 compute_composite_energy(
-                    name=str(item["name"]),
-                    e_cbs_eh=float(item["e_cbs_eh"]),
+                    name=name_val,
+                    e_cbs_eh=float(raw_energy),
                     delta_cv_eh=item.get("delta_cv_eh"),
                     e_ae_cv_eh=item.get("e_ae_cv_eh"),
                     e_fc_cv_eh=item.get("e_fc_cv_eh"),
