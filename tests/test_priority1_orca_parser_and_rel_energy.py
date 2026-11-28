@@ -28,10 +28,17 @@ def test_parse_orca_double_hybrid_does_not_overwrite_scf_with_mp2_total() -> Non
     np.testing.assert_allclose(res.scf_energy_eh, -76.21152855600619, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(res.correlation_energy_eh, -0.134235954, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(res.final_single_point_energy_eh, -76.345928907188, rtol=0.0, atol=1e-12)
-    # SCF + MP2 correlation must equal MP2 TOTAL ENERGY (zero double counting!)
+    # SCF + MP2 correlation must equal MP2 TOTAL ENERGY (zero double counting!),
+    # and SCF + MP2 correlation + D4 dispersion must equal FINAL SINGLE POINT ENERGY.
     np.testing.assert_allclose(
         res.scf_energy_eh + res.correlation_energy_eh,
         -76.345764510,
+        rtol=0.0,
+        atol=1e-8,
+    )
+    np.testing.assert_allclose(
+        res.scf_energy_eh + res.correlation_energy_eh + (-0.000164397),
+        res.final_single_point_energy_eh,
         rtol=0.0,
         atol=1e-8,
     )
@@ -66,9 +73,23 @@ def test_rel_energy_accepts_final_single_point_energy_and_gives_clear_error(tmp_
     with pytest.raises(ValueError, match="missing a finite base energy"):
         compute_relative_energies([{"name": "empty_entry"}])
 
+    # Mixing incompatible base energy keys (e.g. e_cbs_eh vs final_single_point_energy_eh) MUST fail closed
+    with pytest.raises(ValueError, match="Inconsistent base energy keys"):
+        compute_relative_energies(
+            [
+                {"name": "A", "final_single_point_energy_eh": -10.0},
+                {"name": "B", "e_cbs_eh": -9.99},
+            ]
+        )
+
     json_file = tmp_path / "species.json"
     json_file.write_text(
-        json.dumps([{"name": "A", "final_single_point_energy_eh": -10.0}, {"name": "B", "e_cbs_eh": -9.99}]),
+        json.dumps(
+            [
+                {"name": "A", "final_single_point_energy_eh": -10.0},
+                {"name": "B", "final_single_point_energy_eh": -9.99},
+            ]
+        ),
         encoding="utf-8",
     )
     assert cli_main(["rel-energy", str(json_file)]) == 0

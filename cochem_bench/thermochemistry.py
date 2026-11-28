@@ -194,26 +194,41 @@ def compute_relative_energies(
         raise ValueError("species list must not be empty.")
 
     evaluated: list[CompositeEnergyResult] = []
+    uniform_energy_key: str | None = None
     for item in species:
         if isinstance(item, CompositeEnergyResult):
+            if uniform_energy_key is not None and uniform_energy_key != "e_cbs_eh":
+                raise ValueError(
+                    f"Inconsistent base energy keys across species ({uniform_energy_key!r} vs 'e_cbs_eh'); "
+                    "relative energies require a uniform energy definition across all species."
+                )
+            uniform_energy_key = "e_cbs_eh"
             evaluated.append(item)
         else:
             item_req = item.get("required_corrections", required_corrections)
             name_val = str(item.get("name") or item.get("source_path") or "")
             if not name_val:
                 raise ValueError("Each species entry must include a nonempty 'name' field.")
-            raw_energy = next(
+            matched = next(
                 (
-                    item[key]
+                    (key, item[key])
                     for key in ("e_cbs_eh", "final_single_point_energy_eh", "e_total_eh", "energy_eh")
                     if key in item and item[key] is not None
                 ),
                 None,
             )
-            if raw_energy is None:
+            if matched is None:
                 raise ValueError(
                     f"Species {name_val!r} is missing a finite base energy "
                     "(expected 'e_cbs_eh' or 'final_single_point_energy_eh')."
+                )
+            matched_key, raw_energy = matched
+            if uniform_energy_key is None:
+                uniform_energy_key = matched_key
+            elif matched_key != uniform_energy_key:
+                raise ValueError(
+                    f"Inconsistent base energy keys across species ({uniform_energy_key!r} vs {matched_key!r}); "
+                    "relative energies require a uniform energy definition across all species."
                 )
             evaluated.append(
                 compute_composite_energy(
