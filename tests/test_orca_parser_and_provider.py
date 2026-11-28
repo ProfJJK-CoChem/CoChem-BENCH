@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zero-mock tests for real ORCA 6.1.1 output parsing, diagnostic audits, CLI, and bench_provider."""
+"""Zero-mock tests for real ORCA 6.1.1 parsing, diagnostic audits, CLI, and bench_provider."""
 
 from __future__ import annotations
 
@@ -13,8 +13,14 @@ import pytest
 
 from cochem_bench.cli import main as cli_main
 from cochem_bench.orca_parser import parse_orca_energy, parse_orca_output_text
-from cochem_bench.provider import OPERATIONS, bench_provider, dispatch_operation, execute_handoff
+from cochem_bench.provider import (
+    OPERATIONS,
+    bench_provider,
+    dispatch_operation,
+    execute_handoff,
+)
 from cochem_bench.verifier import audit_diagnostics
+
 
 def _d_drive_path(*parts: str) -> Path:
     win_path = Path("D:\\", *parts)
@@ -24,7 +30,13 @@ def _d_drive_path(*parts: str) -> Path:
 
 
 H2O_ORCA_OUT = _d_drive_path(
-    "__CoChem", "GitHub-Repo", "CoChem-GEOM", "benchmarks", "h2o_t_geom_01", "orca_ccsd_cc_pvtz", "h2o_ccsd_pvtz.out"
+    "__CoChem",
+    "GitHub-Repo",
+    "CoChem-GEOM",
+    "benchmarks",
+    "h2o_t_geom_01",
+    "orca_ccsd_cc_pvtz",
+    "h2o_ccsd_pvtz.out",
 )
 HCOOH_DME_ORCA_OUT = _d_drive_path("_orca_jobs", "hcooh-dme", "S1_revdsd_opt.out")
 
@@ -35,7 +47,9 @@ def test_parse_real_orca_h2o_ccsd_pvtz() -> None:
     res = parse_orca_energy(H2O_ORCA_OUT)
 
     assert res.orca_version == "6.1.1"
-    np.testing.assert_allclose(res.final_single_point_energy_eh, -76.324556570992, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(
+        res.final_single_point_energy_eh, -76.324556570992, rtol=0.0, atol=1e-12
+    )
     np.testing.assert_allclose(res.t1_diagnostic, 0.006523723, rtol=0.0, atol=1e-9)
     np.testing.assert_allclose(res.scf_energy_eh, -76.05713391183889, rtol=0.0, atol=1e-10)
     np.testing.assert_allclose(res.correlation_energy_eh, -0.267422659, rtol=0.0, atol=1e-9)
@@ -52,8 +66,21 @@ def test_parse_real_orca_s1_revdsd_opt() -> None:
     res = parse_orca_energy(HCOOH_DME_ORCA_OUT)
 
     assert res.orca_version == "6.1.1"
-    np.testing.assert_allclose(res.final_single_point_energy_eh, -344.364232550375, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res.scf_energy_eh, -343.71058526939595, rtol=0.0, atol=1e-10)
     np.testing.assert_allclose(res.correlation_energy_eh, -0.648018417, rtol=0.0, atol=1e-9)
+    np.testing.assert_allclose(res.mp2_total_energy_eh, -344.358603687, rtol=0.0, atol=1e-9)
+    np.testing.assert_allclose(
+        res.double_hybrid_total_energy_eh, -344.364232550375, rtol=0.0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        res.final_single_point_energy_eh, -344.364232550375, rtol=0.0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        res.scf_energy_eh + res.correlation_energy_eh,
+        res.mp2_total_energy_eh,
+        rtol=0.0,
+        atol=1e-6,
+    )
     assert res.scf_converged is True
     assert res.opt_converged is True
     assert res.terminated_normally is True
@@ -131,7 +158,9 @@ def test_bench_provider_contract_and_all_operations() -> None:
 
     # 3. parse_orca_energy
     orca_res = dispatch_operation("parse_orca_energy", {"path": str(H2O_ORCA_OUT)})
-    np.testing.assert_allclose(orca_res["final_single_point_energy_eh"], -76.324556570992, atol=1e-12)
+    np.testing.assert_allclose(
+        orca_res["final_single_point_energy_eh"], -76.324556570992, atol=1e-12
+    )
 
     # 4. audit_diagnostics
     audit_res = dispatch_operation("audit_diagnostics", {"path": str(H2O_ORCA_OUT)})
@@ -177,7 +206,7 @@ def test_entry_point_and_handoff_and_cli() -> None:
 
 
 def test_parse_orca6_ccsdt_includes_triples_and_preserves_ccsd_mp2_compat() -> None:
-    """Verify ORCA 6 CCSD(T), DLPNO-CCSD(T), DLPNO-CCSD(T)-F12 include (T) triples without breaking CCSD/MP2."""
+    """Verify ORCA 6 CCSD(T)/DLPNO/F12 include (T) triples without breaking CCSD/MP2."""
     ccsdt_h2o_text = """
                              Program Version 6.1.1  -  RELEASE   -
     |  1> ! RHF CCSD(T) cc-pVTZ VeryTightSCF
@@ -206,7 +235,9 @@ def test_parse_orca6_ccsdt_includes_triples_and_preserves_ccsd_mp2_compat() -> N
     np.testing.assert_allclose(res_t.scf_energy_eh, -76.057133911839, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(res_t.correlation_energy_eh, -0.275135659, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(res_t.triples_correction_eh, -0.007713000, rtol=0.0, atol=1e-12)
-    np.testing.assert_allclose(res_t.final_single_point_energy_eh, -76.332269571000, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(
+        res_t.final_single_point_energy_eh, -76.332269571000, rtol=0.0, atol=1e-12
+    )
     np.testing.assert_allclose(
         res_t.scf_energy_eh + res_t.correlation_energy_eh,
         res_t.final_single_point_energy_eh,
@@ -234,7 +265,9 @@ def test_parse_orca6_ccsdt_includes_triples_and_preserves_ccsd_mp2_compat() -> N
     res_dlpno = parse_orca_output_text(dlpno_ccsdt_text)
     np.testing.assert_allclose(res_dlpno.correlation_energy_eh, -1.341410480, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(res_dlpno.triples_correction_eh, -0.063893738, rtol=0.0, atol=1e-12)
-    np.testing.assert_allclose(res_dlpno.final_single_point_energy_eh, -373.941280235, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(
+        res_dlpno.final_single_point_energy_eh, -373.941280235, rtol=0.0, atol=1e-12
+    )
 
     dlpno_f12_text = """
                              Program Version 6.1.1  -  RELEASE   -
@@ -277,3 +310,72 @@ def test_parse_orca6_ccsdt_includes_triples_and_preserves_ccsd_mp2_compat() -> N
     res_mp2 = parse_orca_output_text(pure_mp2_text)
     np.testing.assert_allclose(res_mp2.correlation_energy_eh, -0.260123456, rtol=0.0, atol=1e-12)
     assert res_mp2.triples_correction_eh is None
+    assert res_mp2.double_hybrid_total_energy_eh is None
+
+
+def test_parse_orca6_revdsd_double_hybrid_preserves_scf_mp2_and_ccsdt_triples() -> None:
+    """Regression test for FINDING-490-03: MP2 TOTAL ENERGY must never overwrite scf_energy_eh."""
+    # Verbatim converged energy blocks from ORCA 6.1.1 revDSD-PBEP86-D4/2021 def2-TZVPP on H2CO.
+    h2co_revdsd_text = """
+                             Program Version 6.1.1  -  RELEASE   -
+    |  1> ! RKS revDSD-PBEP86-D4/2021 def2-TZVPP RIJCOSX AutoAux TightSCF Opt NumFreq
+                   *           SCF CONVERGED AFTER   3 CYCLES          *
+    Total energy after final integration           :   -114.150443606 Eh
+    Total Energy       :       -114.15044360631127 Eh           -3106.19149 eV
+    -----------------------------------------------
+     RI-MP2 CORRELATION ENERGY:     -0.206843853 Eh
+    -----------------------------------------------
+    ---------------------------------------
+    MP2 TOTAL ENERGY:     -114.357287459 Eh
+    ---------------------------------------
+                              DFT DISPERSION CORRECTION
+    Dispersion correction           -0.000689608
+    -------------------------   --------------------
+    FINAL SINGLE POINT ENERGY      -114.357977066831
+    -------------------------   --------------------
+                                    *** OPTIMIZATION RUN DONE ***
+    THE OPTIMIZATION HAS CONVERGED
+    ****ORCA TERMINATED NORMALLY****
+    """
+    res_dh = parse_orca_output_text(h2co_revdsd_text)
+    assert res_dh.orca_version == "6.1.1"
+    np.testing.assert_allclose(res_dh.scf_energy_eh, -114.15044360631127, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_dh.correlation_energy_eh, -0.206843853, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_dh.mp2_total_energy_eh, -114.357287459, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(
+        res_dh.double_hybrid_total_energy_eh, -114.357977066831, rtol=0.0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        res_dh.final_single_point_energy_eh, -114.357977066831, rtol=0.0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        res_dh.scf_energy_eh + res_dh.correlation_energy_eh,
+        res_dh.mp2_total_energy_eh,
+        rtol=0.0,
+        atol=1e-6,
+    )
+    assert res_dh.scf_energy_eh != res_dh.mp2_total_energy_eh
+    assert res_dh.triples_correction_eh is None
+    assert res_dh.scf_converged is True
+    assert res_dh.opt_converged is True
+    assert res_dh.terminated_normally is True
+
+    # Ensure CCSD(T) (T) triples recovery remains exact and is never misclassified as double-hybrid.
+    ccsdt_triples_text = """
+                             Program Version 6.1.1  -  RELEASE   -
+    |  1> ! RHF CCSD(T) cc-pVTZ VeryTightSCF
+    SCF CONVERGED AFTER  11 CYCLES
+    Total Energy       :        -76.057170000000 Eh           -2069.62081 eV
+    E(0)                                       ...    -76.057170000
+    E(CORR)                                    ...     -0.267383000
+    Triples Correction (T)                     ...     -0.007648001
+    Final correlation energy                   ...     -0.275031001
+    FINAL SINGLE POINT ENERGY       -76.332201001000
+    ****ORCA TERMINATED NORMALLY****
+    """
+    res_cc = parse_orca_output_text(ccsdt_triples_text)
+    np.testing.assert_allclose(res_cc.scf_energy_eh, -76.057170000000, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_cc.triples_correction_eh, -0.007648001, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(res_cc.correlation_energy_eh, -0.275031001, rtol=0.0, atol=1e-12)
+    assert res_cc.mp2_total_energy_eh is None
+    assert res_cc.double_hybrid_total_energy_eh is None

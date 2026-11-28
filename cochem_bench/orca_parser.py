@@ -12,9 +12,27 @@ from pydantic import BaseModel, Field
 
 _FLOAT_RE = r"[-+]?\d+(?:\.\d+)?(?:[eEdD][-+]?\d+)?"
 
-_PROGRAM_VERSION_RE = re.compile(r"Program\s+Version\s+([0-9]+\.[0-9]+\.[0-9]+(?:\S*)?)", re.IGNORECASE)
+_PROGRAM_VERSION_RE = re.compile(
+    r"Program\s+Version\s+([0-9]+\.[0-9]+\.[0-9]+(?:\S*)?)",
+    re.IGNORECASE,
+)
 _FINAL_SPE_RE = re.compile(rf"FINAL\s+SINGLE\s+POINT\s+ENERGY\s+({_FLOAT_RE})", re.IGNORECASE)
-_SCF_TOTAL_ENERGY_RE = re.compile(rf"Total\s+Energy\s*:\s*({_FLOAT_RE})\s+Eh", re.IGNORECASE)
+_SCF_TOTAL_ENERGY_RE = re.compile(
+    rf"^[ \t]*Total\s+Energy\s*:\s*({_FLOAT_RE})\s+Eh\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+_MP2_TOTAL_ENERGY_RE = re.compile(
+    rf"^[ \t]*(?:(?:RI|SCS|OO)-)?MP2\s+TOTAL\s+ENERGY\s*:\s*({_FLOAT_RE})\s+Eh\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+_DFT_DOUBLE_HYBRID_EVIDENCE_RE = re.compile(
+    r"^[ \t]*Total\s+energy\s+after\s+final\s+integration\s*:"
+    r"|^[ \t]*DFT\s+DISPERSION\s+CORRECTION\b"
+    r"|^[ \t]*\|\s*\d+>\s*!.*\b(?:rev)?dsd-[a-z0-9/_-]+"
+    r"|^[ \t]*\|\s*\d+>\s*!.*\b(?:b2g?p?-?plyp|mpw2plyp|pwpb95|pbe0-dh|pbe-qidh)"
+    r"|^[ \t]*\|\s*\d+>\s*!.*\b(?:wb2g?p?-?plyp|w?pr2scan)",
+    re.IGNORECASE | re.MULTILINE,
+)
 _E0_RE = re.compile(rf"E\(0\)\s*(?:\.+|:)\s*({_FLOAT_RE})", re.IGNORECASE)
 _FINAL_CORR_F12_RE = re.compile(
     rf"Final\s+correlation\s+energy\s*\(\s*with\s+F12\s*\)\s*(?:\.+|:)\s*({_FLOAT_RE})",
@@ -48,11 +66,20 @@ _ECORR_MP2_RE = re.compile(
 _T1_RE = re.compile(rf"T1\s+diagnostic\s*(?:\.+|:)\s*({_FLOAT_RE})", re.IGNORECASE)
 _D1_RE = re.compile(rf"D1\s+diagnostic\s*(?:\.+|:)\s*({_FLOAT_RE})", re.IGNORECASE)
 _SCF_CONVERGED_RE = re.compile(r"SCF\s+CONVERGED\s+AFTER\s+(\d+)\s+CYCLES", re.IGNORECASE)
-_SCF_NOT_CONVERGED_RE = re.compile(r"SCF\s+NOT\s+CONVERGED|Error.*SCF\s+not\s+converged", re.IGNORECASE)
-_OPT_STARTED_RE = re.compile(r"ORCA\s+GEOMETRY\s+RELAXATION\s+STEP|GEOMETRY\s+OPTIMIZATION\s+CYCLE", re.IGNORECASE)
+_SCF_NOT_CONVERGED_RE = re.compile(
+    r"SCF\s+NOT\s+CONVERGED|Error.*SCF\s+not\s+converged",
+    re.IGNORECASE,
+)
+_OPT_STARTED_RE = re.compile(
+    r"ORCA\s+GEOMETRY\s+RELAXATION\s+STEP|GEOMETRY\s+OPTIMIZATION\s+CYCLE",
+    re.IGNORECASE,
+)
 _OPT_CONVERGED_RE = re.compile(r"THE\s+OPTIMIZATION\s+HAS\s+CONVERGED", re.IGNORECASE)
 _TERMINATED_NORMALLY_RE = re.compile(r"ORCA\s+TERMINATED\s+NORMALLY", re.IGNORECASE)
-_SLOW_CONV_RE = re.compile(r"\bSlowConv\b|VerySlowConv|SCF\s+convergence\s+was\s+slow", re.IGNORECASE)
+_SLOW_CONV_RE = re.compile(
+    r"\bSlowConv\b|VerySlowConv|SCF\s+convergence\s+was\s+slow",
+    re.IGNORECASE,
+)
 
 
 class OrcaEnergyResult(BaseModel):
@@ -62,6 +89,8 @@ class OrcaEnergyResult(BaseModel):
     orca_version: str | None = None
     final_single_point_energy_eh: float | None = None
     scf_energy_eh: float | None = None
+    mp2_total_energy_eh: float | None = None
+    double_hybrid_total_energy_eh: float | None = None
     correlation_energy_eh: float | None = None
     triples_correction_eh: float | None = None
     t1_diagnostic: float | None = None
@@ -88,7 +117,9 @@ def parse_orca_output_text(text: str, *, source_path: str | None = None) -> Orca
     spe_matches = _FINAL_SPE_RE.findall(text)
     final_spe = _parse_float(spe_matches[-1]) if spe_matches else None
 
-    # Prefer SCF Total Energy if present, else MDCI E(0) reference
+    # Prefer anchored SCF Total Energy if present, else MDCI E(0) reference.
+    # Anchoring prevents post-SCF `MP2 TOTAL ENERGY:` lines (e.g. revDSD-PBEP86-D4)
+    # from overwriting `scf_energy_eh`.
     e0_matches = _E0_RE.findall(text)
     scf_matches = _SCF_TOTAL_ENERGY_RE.findall(text)
     if scf_matches:
@@ -98,6 +129,9 @@ def parse_orca_output_text(text: str, *, source_path: str | None = None) -> Orca
     else:
         scf_energy = None
 
+    mp2_total_matches = _MP2_TOTAL_ENERGY_RE.findall(text)
+    mp2_total_energy = _parse_float(mp2_total_matches[-1]) if mp2_total_matches else None
+
     # Correlation energy priority:
     # 1. Final correlation energy (with F12)  -> CCSD(T)-F12 / DLPNO-CCSD(T)-F12
     # 2. Final correlation energy             -> CCSD(T) / DLPNO-CCSD(T) (includes (T) triples)
@@ -106,6 +140,7 @@ def parse_orca_output_text(text: str, *, source_path: str | None = None) -> Orca
     # 5. E(CORR)                              -> canonical CCSD without triples
     # 6. [RI-MP2] CORRELATION ENERGY          -> MP2 / double-hybrid DFT
     corr_energy: float | None = None
+    matched_mp2_corr = False
     for pattern in (
         _FINAL_CORR_F12_RE,
         _FINAL_CORR_RE,
@@ -117,7 +152,17 @@ def parse_orca_output_text(text: str, *, source_path: str | None = None) -> Orca
         matches = pattern.findall(text)
         if matches:
             corr_energy = _parse_float(matches[-1])
+            matched_mp2_corr = pattern is _ECORR_MP2_RE
             break
+
+    is_double_hybrid = (mp2_total_energy is not None or matched_mp2_corr) and bool(
+        _DFT_DOUBLE_HYBRID_EVIDENCE_RE.search(text)
+    )
+    double_hybrid_total_energy = (
+        (final_spe if final_spe is not None else mp2_total_energy)
+        if is_double_hybrid
+        else None
+    )
 
     triples_matches = _SCALED_TRIPLES_RE.findall(text) or _TRIPLES_RE.findall(text)
     triples_corr = _parse_float(triples_matches[-1]) if triples_matches else None
@@ -156,6 +201,8 @@ def parse_orca_output_text(text: str, *, source_path: str | None = None) -> Orca
         orca_version=orca_version,
         final_single_point_energy_eh=final_spe,
         scf_energy_eh=scf_energy,
+        mp2_total_energy_eh=mp2_total_energy,
+        double_hybrid_total_energy_eh=double_hybrid_total_energy,
         correlation_energy_eh=corr_energy,
         triples_correction_eh=triples_corr,
         t1_diagnostic=t1_val,
