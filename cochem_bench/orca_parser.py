@@ -14,7 +14,7 @@ _FLOAT_RE = r"[-+]?\d+(?:\.\d+)?(?:[eEdD][-+]?\d+)?"
 
 _PROGRAM_VERSION_RE = re.compile(r"Program\s+Version\s+([0-9]+\.[0-9]+\.[0-9]+(?:\S*)?)", re.IGNORECASE)
 _FINAL_SPE_RE = re.compile(rf"FINAL\s+SINGLE\s+POINT\s+ENERGY\s+({_FLOAT_RE})", re.IGNORECASE)
-_SCF_TOTAL_ENERGY_RE = re.compile(rf"Total\s+Energy\s*:\s*({_FLOAT_RE})\s+Eh", re.IGNORECASE)
+_SCF_TOTAL_ENERGY_RE = re.compile(rf"(?m)^\s*Total\s+Energy\s*:\s*({_FLOAT_RE})\s+Eh", re.IGNORECASE)
 _E0_RE = re.compile(rf"E\(0\)\s*(?:\.+|:)\s*({_FLOAT_RE})", re.IGNORECASE)
 _FINAL_CORR_F12_RE = re.compile(
     rf"Final\s+correlation\s+energy\s*\(\s*with\s+F12\s*\)\s*(?:\.+|:)\s*({_FLOAT_RE})",
